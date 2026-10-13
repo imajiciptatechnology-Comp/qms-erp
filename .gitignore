@@ -39,3 +39,25 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# local sqlite database
+/dev.db
+/prisma/dev.db
+*.db-journal
+
+# runtime JSON data store (created automatically at runtime)
+/.data/*.json
+
+# user-uploaded files
+/public/uploads/*
+!/public/uploads/.gitkeep
+
+# local AI tool configs/caches (not part of the app)
+/.claude
+/.gemini
+/.impeccable
+.mock-auth.ts
+.mock-next-cache.js
+.mock-next-headers.js

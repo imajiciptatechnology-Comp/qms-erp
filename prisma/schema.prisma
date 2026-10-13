@@ -1,0 +1,525 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------
+// CORE QMS MODULES
+// ---------------------------------------------------------
+
+model NCR {
+  id                String   @id @default(cuid())
+  ncNumber          String   @unique
+  source            String   @default("System")
+  department        String
+  process           String
+  description       String
+  severity          String   @default("Minor")
+  detectedBy        String?
+  productBatch      String?
+  isoClause         String?
+  dateRaised        String
+  dueDate           String
+  status            String
+  findingType       String
+  ofiStatus         String?
+  auditId           String?
+  supplierId        String?
+  supplierName      String?
+  linkedRiskId      String?
+  linkedRiskNo      String?
+  containmentAction String?
+  rcaJson           String?
+  actionPlanJson    String?
+  verificationJson  String?
+  historyJson       String   @default("[]")
+}
+
+model Audit {
+  id              String         @id @default(cuid())
+  auditNo         String         @unique
+  department      String
+  plannedDate     String
+  actualDate      String?
+  leadAuditor     String
+  leadAuditorId   String
+  status          String
+  auditType       String?
+  findingsCount   Int            @default(0)
+  ofiCount        Int            @default(0)
+  findings        AuditFinding[]
+}
+
+model AuditFinding {
+  id               String   @id @default(cuid())
+  auditId          String
+  description      String
+  requirement      String
+  type             String
+  status           String
+  correctiveAction String?
+  audit            Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+}
+
+model Document {
+  id               String  @id @default(cuid())
+  docNumber        String  @unique
+  title            String
+  type             String
+  revision         Int
+  status           String
+  department       String
+  lastUpdated      String
+  uploaderId       String?
+  uploaderName     String?
+  fileName         String?
+  fileSize         Int?
+  changeLog        String?
+  nextReviewDate   String?
+  parentId         String?
+  effectiveDate    String?
+  approverName     String?
+  approvedDate     String?
+  origin           String  @default("Internal")
+  retentionPeriod  Int?
+  isRestricted     Boolean @default(false)
+  rejectionReason  String?
+  relatedDocIdsJson    String @default("[]")
+  distributionListJson String @default("[]")
+  acknowledgmentsJson  String @default("[]")
+  historyJson          String @default("[]")
+}
+
+// ---------------------------------------------------------
+// TRAINING & HR MODULES
+// ---------------------------------------------------------
+
+
+// ---------------------------------------------------------
+// RISK & OBJECTIVES MODULES
+// ---------------------------------------------------------
+
+model Risk {
+  id                 String  @id @default(cuid())
+  riskNo             String  @unique
+  title              String
+  category           String
+  process            String
+  department         String
+  description        String
+  potentialImpact    String
+  likelihood         Int
+  severity           Int
+  riskScore          Int
+  riskLevel          String
+  treatment          String
+  mitigationAction   String?
+  opportunity        String?
+  picId              String?
+  picName            String?
+  targetDate         String?
+  residualLikelihood Int?
+  residualSeverity   Int?
+  residualScore      Int?
+  status             String
+  isoClause          String?
+  dateIdentified     String
+  lastReviewed       String?
+  historyJson        String  @default("[]")
+}
+
+model QualityObjective {
+  id           String        @id @default(cuid())
+  objectiveNo  String        @unique
+  title        String
+  description  String
+  department   String
+  isoClause    String
+  kpiName      String
+  kpiUnit      String
+  target       Float
+  baseline     Float?
+  currentValue Float?
+  frequency    String
+  picName      String?
+  startDate    String
+  targetDate   String
+  status       String
+  actions      String?
+  year         Int
+  measurements Measurement[]
+}
+
+model Measurement {
+  id           String           @id @default(cuid())
+  objectiveId  String
+  date         String
+  value        Float
+  notes        String?
+  recordedBy   String
+  objective    QualityObjective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+}
+
+model Training {
+  id               String  @id @default(cuid())
+  trainingNo       String  @unique
+  title            String
+  type             String
+  category         String
+  department       String
+  trainer          String
+  plannedDate      String
+  actualDate       String?
+  durationHours    Float?
+  status           String
+  objectives       String?
+  evidenceFileName String?
+  isoClause        String?
+  effectivenessJson String?
+  passingScore     Int?
+  ncReferenceId    String?
+  ncReferenceNo    String?
+  isMandatory      Boolean @default(false)
+  reminderSent     Boolean @default(false)
+  creatorId        String
+  lastUpdated      String
+  participantsJson String  @default("[]")
+}
+
+model CompetencyRequirement {
+  id                 String @id @default(cuid())
+  department         String
+  requiredCategories String
+  lastUpdated        String
+}
+
+// ---------------------------------------------------------
+// CUSTOMER & SUPPLIER MODULES
+// ---------------------------------------------------------
+
+model Complaint {
+  id                String  @id @default(cuid())
+  complaintNo       String  @unique
+  source            String
+  customerName      String
+  customerContact   String?
+  productService    String
+  complaintDate     String
+  description       String
+  category          String
+  severity          String
+  status            String
+  immediateResponse String?
+  rootCause         String?
+  correctiveAction  String?
+  preventiveAction  String?
+  picName           String?
+  targetDate        String?
+  actualCloseDate   String?
+  customerSatisfied Boolean?
+  satisfactionScore Int?
+  feedbackNotes     String?
+  ncReferenceId     String?
+  ncReferenceNo     String?
+  slaTargetDays     Int     @default(7)
+  createdAt         String
+  historyJson       String  @default("[]")
+}
+
+model SatisfactionSurvey {
+  id          String   @id @default(cuid())
+  surveyNo    String   @unique
+  title       String
+  period      String
+  status      String
+  createdAt   String
+  closedAt    String?
+  avgScore    Float?
+  responsesJson String @default("[]")
+}
+
+model Supplier {
+  id                  String               @id @default(cuid())
+  supplierNo          String               @unique
+  name                String
+  category            String
+  address             String?
+  contactName         String?
+  contactEmail        String?
+  contactPhone        String?
+  productsSupplied    String
+  status              String
+  qualificationStatus String
+  isCritical          Boolean              @default(false)
+  certifications      String?
+  ncCount             Int                  @default(0)
+  approvedDate        String?
+  nextEvaluationDate  String?
+  notes               String?
+  createdAt           String
+  createdBy           String
+  evaluations         SupplierEvaluation[]
+}
+
+model SupplierEvaluation {
+  id             String   @id @default(cuid())
+  supplierId     String
+  period         String
+  evaluatedBy    String
+  evaluationDate String
+  qualityScore   Float
+  deliveryScore  Float
+  serviceScore   Float
+  priceScore     Float
+  totalScore     Float
+  grade          String
+  notes          String?
+  supplier       Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------
+// OPERATIONS (PPC, MAINTENANCE, CALIBRATION, WELDING)
+// ---------------------------------------------------------
+
+model Equipment {
+  id              String              @id @default(cuid())
+  equipmentName   String
+  serialNumber    String              @unique
+  category        String              @default("Measuring")
+  location        String
+  range           String?
+  resolution      String?
+  frequencyMonths Int
+  lastCalDate     String
+  nextCalDate     String
+  status          String
+  tolerance       String
+  picName         String?
+  pmFrequencyDays Int?
+  pmChecklistJson String              @default("[]")
+  records         CalibrationRecord[]
+  pmRecords       PMRecord[]
+}
+
+model CalibrationRecord {
+  id                  String    @id @default(cuid())
+  equipmentId         String
+  date                String
+  certificateNo       String
+  performedBy         String
+  result              String
+  remarks             String?
+  attachmentUrl       String?
+  masterEquipmentUsed String?
+  equipment           Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+}
+
+model PMRecord {
+  id          String    @id @default(cuid())
+  equipmentId String
+  date        String
+  conductedBy String
+  status      String
+  notes       String?
+  equipment   Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+}
+
+model WorkOrder {
+  id               String   @id @default(cuid())
+  productName      String
+  targetQuantity   Int
+  actualQuantity   Int?
+  startDate        String
+  endDate          String
+  status           String
+  operator         String
+  machineId        String
+  notes            String
+  qcRequested      Boolean  @default(false)
+}
+
+model Shipment {
+  id                String         @id @default(cuid())
+  customerName      String
+  destination       String
+  shippingDate      String
+  logisticsProvider String
+  vehicleNumber     String
+  status            String
+  proofOfDelivery   String?
+  remarks           String
+  items             ShipmentItem[]
+}
+
+model ShipmentItem {
+  id            String   @id @default(cuid())
+  shipmentId    String
+  productName   String
+  quantity      Int
+  lotNumber     String
+  workOrderId   String?
+  shipment      Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+}
+
+model Asset {
+  id           String              @id @default(cuid())
+  assetName    String
+  serialNumber String              @unique
+  category     String
+  location     String
+  status       String
+  mtbf         Float?
+  mttr         Float?
+  records      MaintenanceRecord[]
+}
+
+model MaintenanceRecord {
+  id            String  @id @default(cuid())
+  assetId       String
+  type          String
+  date          String
+  description   String
+  performedBy   String
+  status        String
+  downtimeHours Float?
+  cost          Float?
+  asset         Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+}
+
+model Welder {
+  id            String @id @default(cuid())
+  stampNumber   String @unique
+  name          String
+  processType   String
+  position      String
+  expiryDate    String
+  status        String
+  notes         String?
+}
+
+model WPS {
+  id            String @id
+  baseMetal     String
+  fillerMetal   String
+  processType   String
+  status        String
+  issueDate     String
+}
+
+// ---------------------------------------------------------
+// HSE & MOC MODULES
+// ---------------------------------------------------------
+
+model Incident {
+  id          String @id @default(cuid())
+  date        String
+  time        String
+  location    String
+  type        String
+  description String
+  severity    String
+  status      String
+  // Storing actions as a stringified JSON for simplicity if it's dynamic, 
+  // or just omitting the detailed actions relation to save schema size for now
+  actionsJson String @default("[]")
+}
+
+model Patrol {
+  id           String  @id @default(cuid())
+  date         String
+  area         String
+  inspector    String
+  findings     String
+  isCompliance Boolean
+}
+
+model Moc {
+  id               String  @id @default(cuid())
+  title            String
+  description      String
+  category         String
+  requester        String
+  department       String
+  dateRequested    String
+  status           String
+  riskLevel        String
+  assessment       String?
+  mitigation       String?
+  verifier         String?
+  verificationDate String?
+  isEffective      Boolean @default(false)
+}
+
+// ---------------------------------------------------------
+// DESIGN & DEVELOPMENT MODULES
+// ---------------------------------------------------------
+
+model DesignProject {
+  id              String          @id @default(cuid())
+  projectName     String
+  description     String
+  picName         String
+  department      String
+  startDate       String
+  expectedEndDate String
+  status          String
+  planningJson    String          @default("{}")
+  inputsJson      String          @default("{}")
+  controlsJson    String          @default("{}")
+  outputsJson     String          @default("{}")
+  tasks           DesignTask[]
+  changes         DesignChange[]
+}
+
+model DesignTask {
+  id         String        @id @default(cuid())
+  projectId  String
+  title      String
+  assignedTo String
+  dueDate    String
+  status     String
+  project    DesignProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model DesignChange {
+  id               String        @id @default(cuid())
+  projectId        String
+  date             String
+  requester        String
+  description      String
+  impactAnalysis   String
+  documentAction   String?
+  targetDocumentId String?
+  status           String
+  reviewer         String?
+  project          DesignProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+
+model User {
+  id String @id @default(cuid())
+  name String
+  email String @unique
+  passwordHash String
+  role String
+  department String
+  photoUrl String?
+  phone String?
+  bio String?
+}
+
+model ApprovalRouting {
+  id String @id @default(cuid())
+  moduleType String
+  recordId String
+  stage Int
+  approverId String
+  status String
+  notes String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
