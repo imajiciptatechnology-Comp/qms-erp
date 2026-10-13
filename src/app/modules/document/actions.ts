@@ -1,13 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import fs from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
+import { uploadToStorage, deleteFromStorage, copyInStorage } from "@/lib/uploadFile";
 import { createNotificationForUser, createNotificationForPermission } from "@/app/actions/notifications";
 import { getCurrentUser } from "@/app/actions/auth";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
 export type DocumentItem = {
   id: string;
@@ -146,17 +144,12 @@ export async function addDocument(formData: FormData) {
     let fileSize = 0;
 
     if (file && file.size > 0) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const ext = path.extname(file.name);
+      const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
       const safeDocNo = docNumber.replace(/[^a-zA-Z0-9-]/g, "_");
       fileName = `${safeDocNo}_Rev0${ext}`;
       fileSize = file.size;
 
-      if (!fs.existsSync(UPLOAD_DIR)) {
-        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-      }
-
-      fs.writeFileSync(path.join(UPLOAD_DIR, fileName), buffer);
+      fileName = await uploadToStorage("documents", file, fileName);
     }
 
     const currentUser = await getCurrentUser();
@@ -212,10 +205,7 @@ export async function deleteDocument(id: string) {
     if (!doc) return { success: false, message: "Document not found" };
 
     if (doc.fileName) {
-      const filePath = path.join(UPLOAD_DIR, doc.fileName);
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
+      await deleteFromStorage(doc.fileName);
     }
 
     await prisma.document.delete({ where: { id } });
@@ -334,20 +324,15 @@ export async function editDocument(id: string, formData: FormData) {
     let fileSize = doc.fileSize;
 
     if (file && file.size > 0) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const ext = path.extname(file.name);
+      const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
       const safeDocNo = (formData.get("docNumber") as string).replace(/[^a-zA-Z0-9-]/g, "_");
-      fileName = `${safeDocNo}_Rev${doc.revision}${ext}`;
+      const newName = `${safeDocNo}_Rev${doc.revision}${ext}`;
       fileSize = file.size;
-      
-      if (!fs.existsSync(UPLOAD_DIR)) {
-        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-      }
-      fs.writeFileSync(path.join(UPLOAD_DIR, fileName), buffer);
-      
+
+      fileName = await uploadToStorage("documents", file, newName);
+
       if (doc.fileName && doc.fileName !== fileName) {
-        const oldFilePath = path.join(UPLOAD_DIR, doc.fileName);
-        if (fs.existsSync(oldFilePath)) fs.unlinkSync(oldFilePath);
+        await deleteFromStorage(doc.fileName);
       }
     }
 
@@ -396,23 +381,23 @@ export async function createDocumentRevision(oldDocId: string, formData: FormDat
     let fileSize = oldDoc.fileSize;
 
     if (file && file.size > 0) {
-      const buffer = Buffer.from(await file.arrayBuffer());
-      const ext = path.extname(file.name);
+      const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
       const safeDocNo = oldDoc.docNumber.replace(/[^a-zA-Z0-9-]/g, "_");
-      fileName = `${safeDocNo}_Rev${newRevisionNum}${ext}`;
+      const newName = `${safeDocNo}_Rev${newRevisionNum}${ext}`;
       fileSize = file.size;
 
-      if (!fs.existsSync(UPLOAD_DIR)) {
-        fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+      fileName = await uploadToStorage("documents", file, newName);
+      if (oldDoc.fileName && oldDoc.fileName !== fileName) {
+        await deleteFromStorage(oldDoc.fileName);
       }
-      fs.writeFileSync(path.join(UPLOAD_DIR, fileName), buffer);
     } else if (oldDoc.fileName) {
-      const oldPath = path.join(UPLOAD_DIR, oldDoc.fileName);
-      if (fs.existsSync(oldPath)) {
-        const ext = path.extname(oldDoc.fileName);
-        const safeDocNo = oldDoc.docNumber.replace(/[^a-zA-Z0-9-]/g, "_");
-        fileName = `${safeDocNo}_Rev${newRevisionNum}${ext}`;
-        fs.copyFileSync(oldPath, path.join(UPLOAD_DIR, fileName));
+      const ext = oldDoc.fileName.includes(".") ? "." + oldDoc.fileName.split(".").pop() : "";
+      const safeDocNo = oldDoc.docNumber.replace(/[^a-zA-Z0-9-]/g, "_");
+      const newName = `${safeDocNo}_Rev${newRevisionNum}${ext}`;
+      try {
+        fileName = await copyInStorage(oldDoc.fileName, "documents", newName);
+      } catch {
+        fileName = oldDoc.fileName; // fallback: pakai file revisi sebelumnya
       }
     }
 
