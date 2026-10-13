@@ -235,7 +235,7 @@ export default function TrainingDetailClient({
               <FileText className="w-4 h-4 text-indigo-500" /> Evidence / Documents
             </h3>
             {training.evidenceFileName ? (
-              <a href={`/uploads/training/${training.evidenceFileName}`} target="_blank"
+              <a href={training.evidenceFileName} target="_blank"
                 className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors mb-3">
                 <div className="w-9 h-9 bg-indigo-100 rounded-lg flex items-center justify-center text-indigo-600">
                   <FileText className="w-4 h-4" />
