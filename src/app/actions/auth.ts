@@ -1,15 +1,25 @@
 "use server";
 
 import { cookies } from "next/headers";
-import fs from "fs";
-import path from "path";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { getJson, setJson } from "@/lib/kvStore";
+import { uploadToStorage } from "@/lib/uploadFile";
 import * as jose from 'jose';
 import bcrypt from 'bcryptjs';
 
-const ROLES_FILE = path.join(process.cwd(), ".data", "roles.json");
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'super-secret-key-for-qms-erp');
+// JWT_SECRET wajib diisi lewat environment variable.
+// Tidak ada lagi nilai default: secret default yang tertulis di repo
+// memungkinkan siapa pun memalsukan token login.
+function getJwtSecretKey(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error(
+      "JWT_SECRET belum di-set. Tambahkan JWT_SECRET ke environment."
+    );
+  }
+  return new TextEncoder().encode(secret);
+}
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
@@ -26,7 +36,7 @@ export async function login(formData: FormData) {
     .setProtectedHeader({ alg })
     .setIssuedAt()
     .setExpirationTime('24h')
-    .sign(JWT_SECRET);
+    .sign(getJwtSecretKey());
 
   const cookieStore = await cookies();
   cookieStore.set("auth_token", token, { httpOnly: true, path: "/" });
@@ -35,12 +45,11 @@ export async function login(formData: FormData) {
 }
 
 export async function getRolesConfig() {
-  if (!fs.existsSync(ROLES_FILE)) return [];
-  return JSON.parse(fs.readFileSync(ROLES_FILE, "utf-8"));
+  return getJson<any[]>("roles", []);
 }
 
-function saveRolesConfig(roles: any[]) {
-  fs.writeFileSync(ROLES_FILE, JSON.stringify(roles, null, 2));
+async function saveRolesConfig(roles: any[]) {
+  await setJson("roles", roles);
 }
 
 export async function logout() {
@@ -63,7 +72,7 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   if (!token) return null;
 
   try {
-    const { payload } = await jose.jwtVerify(token, JWT_SECRET);
+    const { payload } = await jose.jwtVerify(token, getJwtSecretKey());
     return {
       id: payload.id as string,
       name: payload.name as string,
@@ -97,17 +106,9 @@ export async function updateProfile(formData: FormData) {
   if (clearPhoto) {
     photoUrl = null;
   } else if (photoFile && photoFile.size > 0) {
-    const buffer = Buffer.from(await photoFile.arrayBuffer());
-    const ext = path.extname(photoFile.name);
+    const ext = photoFile.name.includes(".") ? "." + photoFile.name.split(".").pop() : "";
     const fileName = `profile_${userId}_${Date.now()}${ext}`;
-    const uploadDir = path.join(process.cwd(), "public", "uploads", "profiles");
-    
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    
-    fs.writeFileSync(path.join(uploadDir, fileName), buffer);
-    photoUrl = `/uploads/profiles/${fileName}`;
+    photoUrl = await uploadToStorage("profiles", photoFile, fileName);
   }
 
   const name = formData.get("name") as string;
@@ -165,7 +166,7 @@ export async function updateRolePermissions(roleName: string, moduleIds: string[
     roles[roleIndex].permissions = moduleIds;
   }
 
-  saveRolesConfig(roles);
+  await saveRolesConfig(roles);
   
   revalidatePath("/", "layout");
   
