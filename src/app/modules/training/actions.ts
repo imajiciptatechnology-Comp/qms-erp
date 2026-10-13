@@ -1,12 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import fs from "fs";
-import path from "path";
 import { getCurrentUser } from "@/app/actions/auth";
 import { prisma } from "@/lib/prisma";
+import { uploadToStorage } from "@/lib/uploadFile";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "training");
 
 export type TrainingParticipant = {
   userId?: string;
@@ -343,16 +341,13 @@ export async function uploadTrainingEvidence(trainingId: string, formData: FormD
   if (!file || file.size === 0) return { success: false, message: "No file provided" };
 
   try {
-    if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-    const ext = path.extname(file.name);
+    const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
     const fileName = `${trainingId}_${Date.now()}${ext}`;
-    const buffer = Buffer.from(await file.arrayBuffer());
-    fs.writeFileSync(path.join(UPLOAD_DIR, fileName), buffer);
+    const publicUrl = await uploadToStorage("training", file, fileName);
 
     await prisma.training.update({
       where: { id: trainingId },
-      data: { evidenceFileName: fileName, lastUpdated: new Date().toISOString().split("T")[0] }
+      data: { evidenceFileName: publicUrl, lastUpdated: new Date().toISOString().split("T")[0] }
     });
 
     revalidatePath(`/modules/training/${trainingId}`);

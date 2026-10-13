@@ -4,8 +4,8 @@ import fs from "fs";
 import path from "path";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/app/actions/auth";
-
-const MR_FILE = path.join(process.cwd(), ".data", "management-reviews.json");
+import { getJson, setJson } from "@/lib/kvStore";
+import { uploadToStorage } from "@/lib/uploadFile";
 
 export type MRActionItem = {
   id: string;
@@ -50,28 +50,23 @@ export type ManagementReview = {
   createdBy: string;
 };
 
-function getReviewsSync(): ManagementReview[] {
-  try {
-    if (!fs.existsSync(MR_FILE)) return [];
-    return JSON.parse(fs.readFileSync(MR_FILE, "utf-8"));
-  } catch {
-    return [];
-  }
+async function readReviews(): Promise<ManagementReview[]> {
+  return getJson<ManagementReview[]>("management-reviews", []);
 }
 
-function saveReviews(data: ManagementReview[]) {
-  fs.writeFileSync(MR_FILE, JSON.stringify(data, null, 2));
+async function saveReviews(data: ManagementReview[]) {
+  await setJson("management-reviews", data);
 }
 
 export async function getManagementReviews(): Promise<ManagementReview[]> {
-  return getReviewsSync();
+  return await readReviews();
 }
 
 export async function addManagementReview(data: { title: string; reviewDate: string; chairperson: string; attendees: string }) {
   const user = await getCurrentUser();
   if (!user) return { success: false };
 
-  const reviews = getReviewsSync();
+  const reviews = await readReviews();
   const year = new Date().getFullYear();
   const count = reviews.filter(r => r.reviewNo.includes(year.toString())).length + 1;
 
@@ -86,7 +81,7 @@ export async function addManagementReview(data: { title: string; reviewDate: str
   };
 
   reviews.push(newReview);
-  saveReviews(reviews);
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
   return { success: true, id: newReview.id };
 }
@@ -95,12 +90,12 @@ export async function updateManagementReview(id: string, updates: Partial<Manage
   const user = await getCurrentUser();
   if (!user) return { success: false };
 
-  const reviews = getReviewsSync();
+  const reviews = await readReviews();
   const idx = reviews.findIndex(r => r.id === id);
   if (idx === -1) return { success: false };
 
   reviews[idx] = { ...reviews[idx], ...updates };
-  saveReviews(reviews);
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
   return { success: true };
 }
@@ -109,7 +104,7 @@ export async function addActionItem(reviewId: string, item: Omit<MRActionItem, "
   const user = await getCurrentUser();
   if (!user) return { success: false };
 
-  const reviews = getReviewsSync();
+  const reviews = await readReviews();
   const idx = reviews.findIndex(r => r.id === reviewId);
   if (idx === -1) return { success: false };
 
@@ -120,7 +115,7 @@ export async function addActionItem(reviewId: string, item: Omit<MRActionItem, "
   };
 
   reviews[idx].actionItems.push(newItem);
-  saveReviews(reviews);
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
   return { success: true };
 }
@@ -129,7 +124,7 @@ export async function updateActionItem(reviewId: string, itemId: string, updates
   const user = await getCurrentUser();
   if (!user) return { success: false };
 
-  const reviews = getReviewsSync();
+  const reviews = await readReviews();
   const rIdx = reviews.findIndex(r => r.id === reviewId);
   if (rIdx === -1) return { success: false };
 
@@ -141,7 +136,7 @@ export async function updateActionItem(reviewId: string, itemId: string, updates
   }
 
   reviews[rIdx].actionItems[iIdx] = { ...reviews[rIdx].actionItems[iIdx], ...updates };
-  saveReviews(reviews);
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
   return { success: true };
 }
@@ -150,7 +145,7 @@ export async function approveManagementReview(id: string) {
   const user = await getCurrentUser();
   if (!user) return { success: false, message: "Unauthorized" };
 
-  const reviews = getReviewsSync();
+  const reviews = await readReviews();
   const idx = reviews.findIndex(r => r.id === id);
   if (idx === -1) return { success: false, message: "Review not found" };
   if (reviews[idx].status !== "Completed") return { success: false, message: "Review must be Completed before approving" };
@@ -158,7 +153,7 @@ export async function approveManagementReview(id: string) {
   reviews[idx].status = "Approved";
   reviews[idx].approvedBy = user.name;
   reviews[idx].approvedDate = new Date().toISOString().split("T")[0];
-  saveReviews(reviews);
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
   return { success: true };
 }
@@ -254,33 +249,26 @@ export async function uploadMRMinutes(reviewId: string, formData: FormData) {
   const file = formData.get("file") as File;
   if (!file || !file.name) return { success: false, message: "No file provided" };
 
-  const { default: path } = await import("path");
-  const { default: fs } = await import("fs");
-  const uploadDir = path.join(process.cwd(), "public", "uploads", "management-reviews");
-  if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-  const ext = file.name.split(".").pop();
+  const ext = file.name.includes(".") ? file.name.split(".").pop() : "";
   const fileName = `MR-${reviewId}-minutes-${Date.now()}.${ext}`;
-  const filePath = path.join(uploadDir, fileName);
-  const buffer = Buffer.from(await file.arrayBuffer());
-  fs.writeFileSync(filePath, buffer);
+  const publicUrl = await uploadToStorage("management-reviews", file, fileName);
 
-  const reviews = getReviewsSync();
+  const reviews = await readReviews();
   const idx = reviews.findIndex(r => r.id === reviewId);
   if (idx === -1) return { success: false, message: "Review not found" };
 
-  reviews[idx].minutesFileName = fileName;
-  saveReviews(reviews);
+  reviews[idx].minutesFileName = publicUrl;
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
-  return { success: true, fileName };
+  return { success: true, fileName: publicUrl };
 }
 
 export async function deleteManagementReview(id: string) {
   const user = await getCurrentUser();
   if (!user) return { success: false };
 
-  const reviews = getReviewsSync().filter(r => r.id !== id);
-  saveReviews(reviews);
+  const reviews = (await readReviews()).filter((r: ManagementReview) => r.id !== id);
+  await saveReviews(reviews);
   revalidatePath("/modules/management-review");
   return { success: true };
 }

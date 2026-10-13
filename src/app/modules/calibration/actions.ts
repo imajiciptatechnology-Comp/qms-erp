@@ -1,12 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import fs from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
+import { uploadToStorage } from "@/lib/uploadFile";
 import { getCurrentUser } from "@/app/actions/auth";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "calibration");
 
 export interface CalibrationRecord {
   id: string;
@@ -187,16 +185,13 @@ export async function uploadCalibrationCertificate(equipmentId: string, recordId
   const file = formData.get("file") as File | null;
   if (!file || file.size === 0) return { success: false, message: "No file provided" };
 
-  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-  const ext = path.extname(file.name);
+  const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
   const fileName = `${recordId}${ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  fs.writeFileSync(path.join(UPLOAD_DIR, fileName), buffer);
+  const publicUrl = await uploadToStorage("calibration", file, fileName);
 
   await prisma.calibrationRecord.update({
     where: { id: recordId },
-    data: { attachmentUrl: `/uploads/calibration/${fileName}` }
+    data: { attachmentUrl: publicUrl }
   });
 
   revalidatePath(`/modules/calibration/${equipmentId}`);

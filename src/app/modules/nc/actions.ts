@@ -1,13 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import fs from "fs";
-import path from "path";
 import { prisma } from "@/lib/prisma";
+import { uploadToStorage } from "@/lib/uploadFile";
 import { getCurrentUser } from "@/app/actions/auth";
 import { createNotificationForUser } from "@/app/actions/notifications";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads", "nc");
 
 export type RCA = {
   why1?: string;
@@ -214,15 +212,12 @@ export async function uploadNCEvidence(id: string, formData: FormData) {
   const nc = await prisma.nCR.findUnique({ where: { id } });
   if (!nc) return { success: false, message: "NCR not found" };
 
-  if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-
-  const ext = path.extname(file.name);
+  const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
   const fileName = `${nc.ncNumber.replace(/[^a-zA-Z0-9-]/g, "_")}_${Date.now()}${ext}`;
-  const buffer = Buffer.from(await file.arrayBuffer());
-  fs.writeFileSync(path.join(UPLOAD_DIR, fileName), buffer);
+  const publicUrl = await uploadToStorage("nc", file, fileName);
 
   const actionPlan = safeParse<ActionPlanDetail>(nc.actionPlanJson, {});
-  actionPlan.evidenceFiles = [...(actionPlan.evidenceFiles || []), fileName];
+  actionPlan.evidenceFiles = [...(actionPlan.evidenceFiles || []), publicUrl];
 
   await prisma.nCR.update({ where: { id }, data: { actionPlanJson: JSON.stringify(actionPlan) } });
   await logHistory(id, "Uploaded implementation evidence", file.name);
