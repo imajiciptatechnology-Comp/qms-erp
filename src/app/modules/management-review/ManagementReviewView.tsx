@@ -336,7 +336,7 @@ function ReviewDetailPanel({ review, onClose, canManage }: { review: ManagementR
             </div>
             <div className="px-4 py-3">
               {review.minutesFileName ? (
-                <a href={`/uploads/management-reviews/${review.minutesFileName}`} target="_blank" rel="noopener noreferrer"
+                <a href={review.minutesFileName} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-3 p-2.5 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
                   <div className="w-8 h-8 bg-purple-100 rounded flex items-center justify-center text-purple-600">
                     <FileText className="w-4 h-4" />
