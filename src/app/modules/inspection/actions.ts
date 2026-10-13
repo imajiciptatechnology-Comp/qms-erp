@@ -1,10 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import fs from "fs";
-import path from "path";
-
-const INSPECTION_FILE = path.join(process.cwd(), ".data", "inspection.json");
+import { getJson, setJson } from "@/lib/kvStore";
 
 export interface InspectionParameter {
   id: string;
@@ -29,13 +26,7 @@ export interface InspectionRecord {
 }
 
 export async function getInspections(): Promise<InspectionRecord[]> {
-  try {
-    if (!fs.existsSync(INSPECTION_FILE)) return [];
-    return JSON.parse(fs.readFileSync(INSPECTION_FILE, "utf-8"));
-  } catch (error) {
-    console.error("Error reading inspection data:", error);
-    return [];
-  }
+  return getJson<InspectionRecord[]>("inspection", []);
 }
 
 export async function getInspection(id: string) {
@@ -43,12 +34,8 @@ export async function getInspection(id: string) {
   return inspections.find(i => i.id === id) || null;
 }
 
-function saveInspections(data: InspectionRecord[]) {
-  const dir = path.dirname(INSPECTION_FILE);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  fs.writeFileSync(INSPECTION_FILE, JSON.stringify(data, null, 2));
+async function saveInspections(data: InspectionRecord[]) {
+  await setJson("inspection", data);
 }
 
 export async function addInspection(data: {
@@ -71,7 +58,7 @@ export async function addInspection(data: {
   };
   
   inspections.unshift(newInspection);
-  saveInspections(inspections);
+  await saveInspections(inspections);
   revalidatePath("/modules/inspection");
   
   return { success: true, id };
@@ -87,7 +74,7 @@ export async function updateInspectionStatus(id: string, status: InspectionRecor
     inspections[idx].ncReference = ncReference;
   }
   
-  saveInspections(inspections);
+  await saveInspections(inspections);
   revalidatePath("/modules/inspection");
   revalidatePath(`/modules/inspection/${id}`);
   
@@ -105,7 +92,7 @@ export async function addInspectionParameter(inspectionId: string, data: Omit<In
   };
   
   inspections[idx].parameters.push(newParam);
-  saveInspections(inspections);
+  await saveInspections(inspections);
   revalidatePath(`/modules/inspection/${inspectionId}`);
   
   return { success: true };
@@ -128,7 +115,7 @@ export async function updateInspectionParameter(
     ...data
   };
   
-  saveInspections(inspections);
+  await saveInspections(inspections);
   revalidatePath(`/modules/inspection/${inspectionId}`);
   
   return { success: true };
@@ -141,7 +128,7 @@ export async function deleteInspectionParameter(inspectionId: string, parameterI
   
   inspections[idx].parameters = inspections[idx].parameters.filter(p => p.id !== parameterId);
   
-  saveInspections(inspections);
+  await saveInspections(inspections);
   revalidatePath(`/modules/inspection/${inspectionId}`);
   
   return { success: true };
@@ -150,7 +137,7 @@ export async function deleteInspectionParameter(inspectionId: string, parameterI
 export async function deleteInspection(id: string) {
   let inspections = await getInspections();
   inspections = inspections.filter(i => i.id !== id);
-  saveInspections(inspections);
+  await saveInspections(inspections);
   revalidatePath("/modules/inspection");
   return { success: true };
 }

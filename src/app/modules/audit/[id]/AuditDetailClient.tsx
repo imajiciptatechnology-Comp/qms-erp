@@ -302,7 +302,7 @@ export default function AuditDetailClient({ audit, ncrs, user, rolesConfig = [],
                   <div>
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-2">Attached Report</p>
                     <a
-                      href={`/uploads/audits/${audit.reportFileName}`}
+                      href={audit.reportFileName}
                       target="_blank"
                       className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
                     >

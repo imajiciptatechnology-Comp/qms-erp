@@ -475,7 +475,7 @@ export default function NcDetailClient({
                       {ncr.actionPlan.evidenceFiles.map(file => (
                         <div key={file} className="flex items-center justify-between p-2 bg-slate-50 border border-slate-200 rounded-lg">
                           <span className="text-sm text-slate-700 truncate mr-2">{file}</span>
-                          <a href={`/uploads/nc/${file}`} target="_blank" rel="noopener noreferrer" className="p-1 hover:bg-slate-200 rounded text-blue-600">
+                          <a href={file} target="_blank" rel="noopener noreferrer" className="p-1 hover:bg-slate-200 rounded text-blue-600">
                             <Download className="w-4 h-4" />
                           </a>
                         </div>

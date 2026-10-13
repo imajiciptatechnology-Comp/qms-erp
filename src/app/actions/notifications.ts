@@ -1,11 +1,8 @@
 "use server";
 
-import fs from "fs";
-import path from "path";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, getAllUsers, getRolesConfig } from "./auth";
-
-const NOTIFICATIONS_FILE = path.join(process.cwd(), ".data", "notifications.json");
+import { getJson, setJson } from "@/lib/kvStore";
 
 export type Notification = {
   id: string;
@@ -18,12 +15,11 @@ export type Notification = {
 };
 
 export async function getNotifications() {
-  if (!fs.existsSync(NOTIFICATIONS_FILE)) return [];
-  return JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, "utf-8")) as Notification[];
+  return getJson<Notification[]>("notifications", []);
 }
 
 export async function saveNotifications(notifs: Notification[]) {
-  fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifs, null, 2));
+  await setJson("notifications", notifs);
 }
 
 export async function createNotification(data: Omit<Notification, "id" | "isRead" | "createdAt">) {

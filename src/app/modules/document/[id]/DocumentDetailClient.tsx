@@ -247,7 +247,7 @@ export default function DocumentDetailClient({
             <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
               <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-3 mb-4">Current File</h3>
               <a
-                href={`/uploads/${doc.fileName}`}
+                href={doc.fileName}
                 target="_blank"
                 className="flex items-center gap-3 p-3 rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors"
               >
@@ -519,7 +519,7 @@ export default function DocumentDetailClient({
                       <td className="px-6 py-4 text-center">
                         {rev.fileName ? (
                           <a
-                            href={`/uploads/${rev.fileName}`}
+                            href={rev.fileName}
                             target="_blank"
                             className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-medium text-xs"
                           >
