@@ -113,7 +113,8 @@ Step 2 — extract values for these form fields:
 ${fieldList}
 
 Rules:
-- Only use information that is explicitly in the image for that field. Do NOT put unrelated text into a field just to fill it (e.g. never copy an invoice's item list into "description").
+- Extract a field whenever the document explicitly states a value with the same meaning, EVEN IF isExpectedDocument is false. Example: a material request with a row "Departemen: Production" → department = "Production"; a row "Produk / No. Batch: X" → productBatch = "X".
+- Do NOT put text with a different meaning into a field just to fill it: e.g. "Diminta oleh" (requested by) is not "detected by", "Dibutuhkan tanggal" (needed by) is not a due date for closing an NC, and an invoice's item list is not an NC description.
 - If a field is not present or unreadable, use an empty string "".
 - Convert dates to YYYY-MM-DD (Indonesian month names: Januari, Februari, Maret, April, Mei, Juni, Juli, Agustus, September, Oktober, November, Desember).
 - For fields with fixed options, pick the matching option exactly as written; map ticked checkboxes to the option. If nothing matches, use "".
