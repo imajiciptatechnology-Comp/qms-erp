@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Plus, Edit, Scale, Activity, FileText, CheckCircle, AlertTriangle, FileBadge, Calendar, Search, Printer } from "lucide-react";
+import ScanDocumentButton, { highlightAiFields } from "@/components/ScanDocumentButton";
 import { addCalibrationRecord, updateEquipment, EquipmentItem, CalibrationRecord, uploadCalibrationCertificate, raiseNCRFromEquipment, addPMRecord } from "../actions";
 import { getCalibrationStatus } from "../utils";
 
@@ -17,12 +18,29 @@ function AddRecordModal({ equipment, onClose }: { equipment: EquipmentItem; onCl
   });
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const formRef = useRef<HTMLFormElement>(null);
+
+  const addFrequency = (dateStr: string) => {
+    const nextDate = new Date(dateStr);
+    nextDate.setMonth(nextDate.getMonth() + equipment.frequencyMonths);
+    return nextDate.toISOString().split("T")[0];
+  };
 
   // Auto calculate next due date based on frequency
   const handleDateChange = (dateStr: string) => {
-    const nextDate = new Date(dateStr);
-    nextDate.setMonth(nextDate.getMonth() + equipment.frequencyMonths);
-    setForm(prev => ({ ...prev, date: dateStr, nextDueDate: nextDate.toISOString().split("T")[0] }));
+    setForm(prev => ({ ...prev, date: dateStr, nextDueDate: addFrequency(dateStr) }));
+  };
+
+  // Isi form dari hasil scan sertifikat; gambar scan sekaligus dilampirkan.
+  const applyScan = (fields: Record<string, string>, scanned: File) => {
+    setForm(prev => {
+      const next = { ...prev, ...fields } as typeof prev;
+      if (fields.date && !fields.nextDueDate) next.nextDueDate = addFrequency(fields.date);
+      return next;
+    });
+    if (!file) setFile(scanned);
+    // Tunggu render (field masterEquipmentUsed bisa baru muncul) lalu tandai.
+    requestAnimationFrame(() => highlightAiFields(formRef.current, Object.keys(fields)));
   };
 
   async function handleSubmit(e: React.FormEvent) {
@@ -66,34 +84,35 @@ function AddRecordModal({ equipment, onClose }: { equipment: EquipmentItem; onCl
             <svg aria-hidden="true" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form ref={formRef} onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+          <ScanDocumentButton formType="calibration" sampleUrl="/samples/contoh-sertifikat-kalibrasi.png" onExtracted={applyScan} />
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="text-xs font-semibold text-slate-600 block mb-1">Calibration Date *</label>
-              <input required type="date" value={form.date} onChange={e => handleDateChange(e.target.value)}
+              <input required type="date" name="date" value={form.date} onChange={e => handleDateChange(e.target.value)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white" />
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-600 block mb-1">Next Due Date *</label>
-              <input required type="date" value={form.nextDueDate} onChange={e => setForm({...form, nextDueDate: e.target.value})}
+              <input required type="date" name="nextDueDate" value={form.nextDueDate} onChange={e => setForm({...form, nextDueDate: e.target.value})}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white" />
             </div>
             <div className="col-span-2">
               <label className="text-xs font-semibold text-slate-600 block mb-1">Certificate Number</label>
-              <input required value={form.certificateNo} onChange={e => setForm({...form, certificateNo: e.target.value})}
+              <input required name="certificateNo" value={form.certificateNo} onChange={e => setForm({...form, certificateNo: e.target.value})}
                 placeholder="e.g. CERT-2025-001"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white" />
             </div>
             <div className="col-span-2">
               <label className="text-xs font-semibold text-slate-600 block mb-1">Calibrated By (Internal/External)</label>
-              <input required value={form.calibratedBy} onChange={e => setForm({...form, calibratedBy: e.target.value})}
+              <input required name="calibratedBy" value={form.calibratedBy} onChange={e => setForm({...form, calibratedBy: e.target.value})}
                 placeholder="e.g. PT KAN, Internal Lab"
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white" />
             </div>
             {form.calibratedBy.toLowerCase().includes("internal") && (
               <div className="col-span-2">
                 <label className="text-xs font-semibold text-slate-600 block mb-1">Master Equipment Used (for Traceability) *</label>
-                <input required value={form.masterEquipmentUsed} onChange={e => setForm({...form, masterEquipmentUsed: e.target.value})}
+                <input required name="masterEquipmentUsed" value={form.masterEquipmentUsed} onChange={e => setForm({...form, masterEquipmentUsed: e.target.value})}
                   placeholder="e.g. Master Caliper CAL-001"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white" />
               </div>
@@ -102,10 +121,11 @@ function AddRecordModal({ equipment, onClose }: { equipment: EquipmentItem; onCl
               <label className="text-xs font-semibold text-slate-600 block mb-1">Upload Certificate (PDF/Image)</label>
               <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setFile(e.target.files?.[0] || null)}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white" />
+              {file && <p className="text-xs text-slate-500 mt-1">Lampiran: <span className="font-medium text-slate-700">{file.name}</span></p>}
             </div>
             <div className="col-span-2">
               <label className="text-xs font-semibold text-slate-600 block mb-1">Result</label>
-              <select required value={form.result} onChange={e => setForm({...form, result: e.target.value as CalibrationRecord["result"]})}
+              <select required name="result" value={form.result} onChange={e => setForm({...form, result: e.target.value as CalibrationRecord["result"]})}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white">
                 <option value="Pass">Pass / Accepted</option>
                 <option value="Adjusted">Pass after Adjustment</option>
@@ -114,7 +134,7 @@ function AddRecordModal({ equipment, onClose }: { equipment: EquipmentItem; onCl
             </div>
             <div className="col-span-2">
               <label className="text-xs font-semibold text-slate-600 block mb-1">Remarks</label>
-              <textarea rows={2} value={form.remarks} onChange={e => setForm({...form, remarks: e.target.value})}
+              <textarea rows={2} name="remarks" value={form.remarks} onChange={e => setForm({...form, remarks: e.target.value})}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white resize-none" />
             </div>
           </div>

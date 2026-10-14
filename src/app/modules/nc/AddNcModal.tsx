@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { X, Loader2, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { addNCR } from "./actions";
 import ModalShell from "@/components/ui/ModalShell";
+import ScanDocumentButton, { highlightAiFields } from "@/components/ScanDocumentButton";
 import type { SupplierItem } from "@/app/modules/supplier/actions";
 
 export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
@@ -15,8 +16,25 @@ export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
   const searchParams = useSearchParams();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [source, setSource] = useState(searchParams?.get("source") === "inspection" ? "Process Monitoring" : "Internal Audit");
+  const formRef = useRef<HTMLFormElement>(null);
 
   if (!isOpen) return null;
+
+  // Isi form dari hasil scan AI. Field selain "source" tidak dikontrol state,
+  // jadi nilainya diset langsung ke elemen form.
+  function applyScan(fields: Record<string, string>) {
+    const form = formRef.current;
+    if (!form) return;
+    if (fields.source) setSource(fields.source);
+    for (const [name, value] of Object.entries(fields)) {
+      if (name === "source") continue;
+      const el = form.elements.namedItem(name);
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
+        el.value = value;
+      }
+    }
+    highlightAiFields(form, Object.keys(fields));
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -60,7 +78,9 @@ export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
         </button>
       </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+        <form ref={formRef} onSubmit={handleSubmit} className="p-6 space-y-5 max-h-[80vh] overflow-y-auto">
+          <ScanDocumentButton formType="nc" sampleUrl="/samples/contoh-form-ncr.png" onExtracted={applyScan} />
+
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700">Source <span className="text-red-500">*</span></label>

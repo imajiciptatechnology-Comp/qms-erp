@@ -5,6 +5,9 @@ import EquipmentDetailClient from "./EquipmentDetailClient";
 import Link from "next/link";
 import { ChevronLeft } from "lucide-react";
 
+// Server Action "Scan Dokumen" (AI) di form Record Calibration bisa butuh puluhan detik.
+export const maxDuration = 60;
+
 export default async function EquipmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const user = await getCurrentUser();

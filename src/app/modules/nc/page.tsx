@@ -4,6 +4,9 @@ import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
 import { redirect } from "next/navigation";
 import { getSuppliers } from "@/app/modules/supplier/actions";
 
+// Server Action "Scan Dokumen" (AI) di form NCR bisa butuh puluhan detik.
+export const maxDuration = 60;
+
 export default async function NcManagementPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
