@@ -6,64 +6,14 @@ import {
   TriangleAlert, Target, Building2, PhoneCall,
   Scale, Factory, Truck, Wrench, Flame, HardHat, RefreshCw
 } from "lucide-react";
-import { getNCRs } from "./modules/nc/actions";
-import { getAudits } from "./modules/audit/actions";
-import { getDocuments } from "./modules/document/actions";
-import { getTrainings, getExpiryAlertsFromTrainings } from "./modules/training/dashboard-helpers";
-import { getRisks } from "./modules/risk/actions";
-import { getObjectives } from "./modules/objectives/actions";
-import { getComplaints } from "./modules/complaint/actions";
-import { getSuppliers } from "./modules/supplier/actions";
-import { getEquipments } from "./modules/calibration/actions";
-import { getCalibrationStatus } from "./modules/calibration/utils";
-// New modules imports
-import { getWorkOrders } from "./modules/ppc/actions";
-import { getShipments } from "./modules/shipping/actions";
-import { getMaintenanceRecords } from "./modules/maintenance/actions";
-import { getWelders } from "./modules/welding/actions";
-import { getIncidents } from "./modules/hse/actions";
-import { getMocRecords } from "./modules/moc/actions";
+import { getDashboardData } from "./dashboard-data";
 
 export default async function Home() {
-  const [
-    ncrs, audits, documents, trainings, risks, objectives, complaints, suppliers, equipments,
-    workOrders, shipments, maintenance, welders, incidents, mocRecords
-  ] = await Promise.all([
-    getNCRs(), getAudits(), getDocuments(), getTrainings(),
-    getRisks(), getObjectives(), getComplaints(), getSuppliers(), getEquipments(),
-    getWorkOrders(), getShipments(), getMaintenanceRecords(), getWelders(), getIncidents(), getMocRecords()
-  ]);
-
-  const today = new Date();
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
-  today.setHours(0,0,0,0);
-
-  // ─── NC KPIs ───────────────────────────────────────────────────────────────
-  const openNCs = ncrs.filter(n => n.status !== "Closed" && n.findingType !== "OFI").length;
-  const overdueNCs = ncrs.filter(n => n.status !== "Closed" && n.findingType !== "OFI" && new Date(n.dueDate) < today).length;
-
-  // ─── Audit & Training KPIs ─────────────────────────────────────────────────
-  const auditsThisMonth = audits.filter(a => new Date(a.plannedDate).getMonth() === currentMonth).length;
-  const trainingsThisMonth = trainings.filter(t => new Date(t.plannedDate).getMonth() === currentMonth).length;
-  const certExpirySoon = getExpiryAlertsFromTrainings(trainings, 30).length;
-
-  // ─── New Modules KPIs ──────────────────────────────────────────────────────
-  const activeWOs = workOrders.filter(w => w.status === "Scheduled" || w.status === "In Progress").length;
-  const pendingShipments = shipments.filter(s => s.status === "Pending" || s.status === "In Transit").length;
-  const overdueMaintenance = maintenance.filter(m => m.status !== "Completed" && new Date(m.scheduledDate) < today).length;
-  const expiredWelders = welders.filter(w => {
-    const isExpired = new Date(w.expiryDate) < today;
-    return isExpired || w.status === "Expired";
-  }).length;
-  const openIncidents = incidents.filter(i => i.status === "Open").length;
-  const activeMocs = mocRecords.filter(m => m.status !== "Closed" && m.status !== "Rejected").length;
-
-  // ─── Lists ─────────────────────────────────────────────────────────────────
-  const recentNCs = ncrs.filter(n => n.findingType !== "OFI").sort((a, b) => b.dateRaised.localeCompare(a.dateRaised)).slice(0, 5);
-  const upcomingAudits = audits.filter(a => a.status === "Planned" && new Date(a.plannedDate) >= today).sort((a, b) => a.plannedDate.localeCompare(b.plannedDate)).slice(0, 3);
-  const recentIncidents = incidents.filter(i => i.status === "Open").sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
-  const activeMocList = mocRecords.filter(m => m.status !== "Closed" && m.status !== "Rejected").slice(0, 3);
+  const { kpi, charts, recentNCs, recentIncidents, activeMocList } = await getDashboardData();
+  const {
+    openNCs, overdueNCs, auditsThisMonth, activeMocs, activeRisks, openIncidents,
+    welderCount, expiredWelders, maintenanceCount, overdueMaintenance, activeWOs,
+  } = kpi;
 
   const NC_STATUS_BADGE: Record<string, string> = {
     Open: "bg-red-100 text-red-700",
@@ -81,15 +31,7 @@ export default async function Home() {
       </div>
 
       {/* ─── Graphical Dashboard ──────────────────────────────────────────── */}
-      <DashboardCharts 
-        ncrs={ncrs} 
-        risks={risks} 
-        equipments={equipments} 
-        audits={audits} 
-        documents={documents} 
-        trainings={trainings} 
-        complaints={complaints} 
-      />
+      <DashboardCharts {...charts} />
 
       {/* ─── Row 1: Core QMS KPIs ──────────────────────────────────────────── */}
       <div>
@@ -136,7 +78,7 @@ export default async function Home() {
             </div>
             <div className="min-w-0">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Active Risks</p>
-              <p className="text-3xl font-bold tabular-nums text-slate-800 mt-0.5">{risks.filter(r => r.status !== "Closed").length}</p>
+              <p className="text-3xl font-bold tabular-nums text-slate-800 mt-0.5">{activeRisks}</p>
             </div>
           </Link>
         </div>
@@ -165,7 +107,7 @@ export default async function Home() {
             </div>
             <div className="min-w-0">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Welders</p>
-              <p className="text-3xl font-bold tabular-nums text-slate-800 mt-0.5">{welders.length}</p>
+              <p className="text-3xl font-bold tabular-nums text-slate-800 mt-0.5">{welderCount}</p>
               {expiredWelders > 0 ? (
                 <p className="text-xs text-red-600 font-semibold mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{expiredWelders} Expired!</p>
               ) : <p className="text-xs text-slate-400 mt-1">All Certified</p>}
@@ -178,7 +120,7 @@ export default async function Home() {
             </div>
             <div className="min-w-0">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Maintenance</p>
-              <p className="text-3xl font-bold tabular-nums text-slate-800 mt-0.5">{maintenance.length}</p>
+              <p className="text-3xl font-bold tabular-nums text-slate-800 mt-0.5">{maintenanceCount}</p>
               {overdueMaintenance > 0 ? (
                 <p className="text-xs text-red-600 font-semibold mt-1 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{overdueMaintenance} Overdue</p>
               ) : <p className="text-xs text-slate-400 mt-1">On Schedule</p>}

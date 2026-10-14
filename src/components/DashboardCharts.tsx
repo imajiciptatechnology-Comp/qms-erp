@@ -1,57 +1,23 @@
 "use client";
 
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import type { ChartDatum } from '@/app/dashboard-data';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 const STATUS_COLORS = { Open: '#ef4444', Closed: '#10b981', Pending: '#f59e0b', Approved: '#3b82f6', Draft: '#94a3b8' };
 
-export default function DashboardCharts({ 
-  ncrs = [], risks = [], equipments = [], audits = [], documents = [], trainings = [], complaints = []
-}: { 
-  ncrs?: any[], risks?: any[], equipments?: any[], audits?: any[], documents?: any[], trainings?: any[], complaints?: any[]
+// Data sudah diagregasi di server (lihat getDashboardData), jadi yang dikirim
+// ke browser hanya angka per kategori, bukan seluruh isi tabel.
+export default function DashboardCharts({
+  ncrByDept = [], riskByLevel = [], documentByStatus = [], auditByStatus = [], equipmentByStatus = []
+}: {
+  ncrByDept?: ChartDatum[], riskByLevel?: ChartDatum[], documentByStatus?: ChartDatum[], auditByStatus?: ChartDatum[], equipmentByStatus?: ChartDatum[]
 }) {
-
-  // 1. NCRs by Department (Bar)
-  const ncrDeptCount = ncrs.reduce((acc: any, curr: any) => {
-    acc[curr.department] = (acc[curr.department] || 0) + 1;
-    return acc;
-  }, {});
-  const ncrDeptData = Object.keys(ncrDeptCount).map(key => ({ name: key, count: ncrDeptCount[key] }));
-
-  // 2. Risks by Level (Pie)
-  const riskLevelCount = risks.reduce((acc: any, curr: any) => {
-    acc[curr.riskLevel] = (acc[curr.riskLevel] || 0) + 1;
-    return acc;
-  }, {});
-  const riskLevelData = Object.keys(riskLevelCount).map(key => ({ name: key, value: riskLevelCount[key] }));
-
-  // 3. Equipment Status (Pie)
-  const equipmentStatusCount = equipments.reduce((acc: any, curr: any) => {
-    acc[curr.status] = (acc[curr.status] || 0) + 1;
-    return acc;
-  }, {});
-  const equipmentData = Object.keys(equipmentStatusCount).map(key => ({ name: key, value: equipmentStatusCount[key] }));
-
-  // 4. Audits by Status (Pie)
-  const auditStatusCount = audits.reduce((acc: any, curr: any) => {
-    acc[curr.status] = (acc[curr.status] || 0) + 1;
-    return acc;
-  }, {});
-  const auditData = Object.keys(auditStatusCount).map(key => ({ name: key, value: auditStatusCount[key] }));
-
-  // 5. Documents by Status (Pie)
-  const docStatusCount = documents.reduce((acc: any, curr: any) => {
-    acc[curr.status] = (acc[curr.status] || 0) + 1;
-    return acc;
-  }, {});
-  const docData = Object.keys(docStatusCount).map(key => ({ name: key, value: docStatusCount[key] }));
-
-  // 6. Complaints by Status (Bar)
-  const complaintCount = complaints.reduce((acc: any, curr: any) => {
-    acc[curr.status] = (acc[curr.status] || 0) + 1;
-    return acc;
-  }, {});
-  const complaintData = Object.keys(complaintCount).map(key => ({ name: key, count: complaintCount[key] }));
+  const ncrDeptData = ncrByDept.map(d => ({ name: d.name, count: d.value }));
+  const riskLevelData = riskByLevel;
+  const equipmentData = equipmentByStatus;
+  const auditData = auditByStatus;
+  const docData = documentByStatus;
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 mt-2">

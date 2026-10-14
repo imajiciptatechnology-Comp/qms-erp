@@ -26,12 +26,17 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const jwtUser = await getCurrentUser();
-  const rolesConfig = await getRolesConfig();
-  
-  let user = null;
-  if (jwtUser) {
-    user = await prisma.user.findUnique({ where: { id: jwtUser.id as string } });
-  }
+
+  // Jalankan paralel (bukan berurutan) & jangan kirim passwordHash ke client.
+  const [rolesConfig, user] = await Promise.all([
+    getRolesConfig(),
+    jwtUser
+      ? prisma.user.findUnique({
+          where: { id: jwtUser.id as string },
+          select: { id: true, name: true, email: true, role: true, department: true, photoUrl: true, phone: true, bio: true },
+        })
+      : null,
+  ]);
 
   return (
     <html
