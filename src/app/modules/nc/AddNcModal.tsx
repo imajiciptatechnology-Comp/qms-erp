@@ -5,7 +5,7 @@ import { X, Loader2, AlertTriangle } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { addNCR } from "./actions";
 import ModalShell from "@/components/ui/ModalShell";
-import ScanDocumentButton, { highlightAiFields } from "@/components/ScanDocumentButton";
+import ScanDocumentButton, { highlightScanFields } from "@/components/ScanDocumentButton";
 import type { SupplierItem } from "@/app/modules/supplier/actions";
 
 export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
@@ -21,19 +21,21 @@ export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
   if (!isOpen) return null;
 
   // Isi form dari hasil scan AI. Field selain "source" tidak dikontrol state,
-  // jadi nilainya diset langsung ke elemen form.
-  function applyScan(fields: Record<string, string>) {
+  // jadi nilainya diset langsung ke elemen form. Field yang tidak ditemukan
+  // dikosongkan (termasuk dropdown ber-default) agar user wajib mengisinya.
+  function applyScan(fields: Record<string, string>, _file: File, missingFields: string[]) {
     const form = formRef.current;
     if (!form) return;
-    if (fields.source) setSource(fields.source);
-    for (const [name, value] of Object.entries(fields)) {
+    const values: Record<string, string> = { ...Object.fromEntries(missingFields.map(n => [n, ""])), ...fields };
+    if ("source" in values) setSource(values.source);
+    for (const [name, value] of Object.entries(values)) {
       if (name === "source") continue;
       const el = form.elements.namedItem(name);
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) {
         el.value = value;
       }
     }
-    highlightAiFields(form, Object.keys(fields));
+    highlightScanFields(form, Object.keys(fields), missingFields);
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -86,6 +88,8 @@ export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
               <label className="text-sm font-semibold text-slate-700">Source <span className="text-red-500">*</span></label>
               <select required name="source" value={source} onChange={e => setSource(e.target.value)}
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-slate-900 bg-white">
+                {/* Hanya terpilih saat hasil scan tidak menemukan source */}
+                <option value="" disabled hidden>— Pilih source —</option>
                 <option value="Internal Audit">Internal Audit</option>
                 <option value="Customer Complaint">Customer Complaint</option>
                 <option value="Process Monitoring">Process Monitoring</option>
@@ -129,7 +133,9 @@ export default function AddNcModal({ isOpen, onClose, suppliers = [] }: {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-semibold text-slate-700">Severity <span className="text-red-500">*</span></label>
-              <select required name="severity" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-slate-900 bg-white">
+              <select required name="severity" defaultValue="Minor" className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-slate-900 bg-white">
+                {/* Hanya terpilih saat hasil scan tidak menemukan severity */}
+                <option value="" disabled hidden>— Pilih severity —</option>
                 <option value="Minor">Minor</option>
                 <option value="Major">Major</option>
                 <option value="Critical">Critical</option>

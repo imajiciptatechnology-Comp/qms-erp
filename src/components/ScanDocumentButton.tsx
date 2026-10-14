@@ -22,15 +22,33 @@ async function compressImage(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
-/** Tandai sementara field yang diisi AI (hilang saat user mengedit field itu). */
-export function highlightAiFields(form: HTMLFormElement | null, names: string[]) {
+const MARKS = {
+  ai: ["ring-2", "ring-violet-400", "bg-violet-50"],
+  missing: ["ring-2", "ring-amber-400", "bg-amber-50"],
+};
+
+/**
+ * Tandai field hasil scan: ungu = diisi AI, kuning = tidak ditemukan & harus
+ * diisi manual. Tanda hilang saat user mengubah field itu.
+ */
+export function highlightScanFields(form: HTMLFormElement | null, filled: string[], missing: string[] = []) {
   if (!form) return;
-  for (const name of names) {
-    const el = form.elements.namedItem(name);
-    if (!(el instanceof HTMLElement)) continue;
-    el.classList.add("ring-2", "ring-violet-400", "bg-violet-50");
-    el.addEventListener("input", () => el.classList.remove("ring-2", "ring-violet-400", "bg-violet-50"), { once: true });
+  const all = [...MARKS.ai, ...MARKS.missing];
+  for (const el of Array.from(form.elements)) {
+    if (el instanceof HTMLElement) el.classList.remove(...all);
   }
+  const mark = (names: string[], classes: string[]) => {
+    for (const name of names) {
+      const el = form.elements.namedItem(name);
+      if (!(el instanceof HTMLElement)) continue;
+      el.classList.add(...classes);
+      const clear = () => el.classList.remove(...all);
+      el.addEventListener("input", clear, { once: true });
+      el.addEventListener("change", clear, { once: true });
+    }
+  };
+  mark(filled, MARKS.ai);
+  mark(missing, MARKS.missing);
 }
 
 export default function ScanDocumentButton({
@@ -40,17 +58,19 @@ export default function ScanDocumentButton({
 }: {
   formType: ScanFormType;
   sampleUrl?: string;
-  onExtracted: (fields: Record<string, string>, file: File) => void;
+  /** `missingFields`: nama field yang harus dikosongkan & ditandai kuning. */
+  onExtracted: (fields: Record<string, string>, file: File, missingFields: string[]) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<{ filled: number; missing: string[] } | null>(null);
+  type Extracted = { fields: Record<string, string>; missing: string[]; missingFields: string[]; file: File };
   // Hasil scan dari dokumen yang jenisnya tidak cocok: tunggu keputusan user.
-  const [pending, setPending] = useState<{ fields: Record<string, string>; missing: string[]; file: File; expected: string; detected: string } | null>(null);
+  const [pending, setPending] = useState<(Extracted & { expected: string; detected: string }) | null>(null);
 
-  const apply = (fields: Record<string, string>, missing: string[], file: File) => {
-    onExtracted(fields, file);
+  const apply = ({ fields, missing, missingFields, file }: Extracted) => {
+    onExtracted(fields, file, missingFields);
     setSummary({ filled: Object.keys(fields).length, missing });
     setPending(null);
   };
@@ -72,11 +92,12 @@ export default function ScanDocumentButton({
         setError(res.error);
         return;
       }
+      const extracted = { fields: res.fields, missing: res.missing, missingFields: res.missingFields, file };
       if (res.mismatch) {
-        setPending({ fields: res.fields, missing: res.missing, file, ...res.mismatch });
+        setPending({ ...extracted, ...res.mismatch });
         return;
       }
-      apply(res.fields, res.missing, file);
+      apply(extracted);
     } catch {
       setError("Gagal membaca gambar. Coba foto/scan lain.");
     } finally {
@@ -135,7 +156,7 @@ export default function ScanDocumentButton({
               className="px-2.5 py-1 rounded-md border border-amber-300 bg-white text-amber-900 font-semibold hover:bg-amber-100">
               Batalkan
             </button>
-            <button type="button" onClick={() => apply(pending.fields, pending.missing, pending.file)}
+            <button type="button" onClick={() => apply(pending)}
               className="px-2.5 py-1 rounded-md bg-amber-600 text-white font-semibold hover:bg-amber-700">
               Tetap isi
             </button>
@@ -148,7 +169,7 @@ export default function ScanDocumentButton({
           <div className="space-y-0.5">
             <p><b>{summary.filled} field</b> diisi oleh AI. Periksa kembali sebelum menyimpan.</p>
             {summary.missing.length > 0 && (
-              <p className="text-amber-800">Tidak ditemukan di dokumen, isi manual: <b>{summary.missing.join(", ")}</b></p>
+              <p className="text-amber-800">Tidak ditemukan di dokumen, isi manual (ditandai kuning): <b>{summary.missing.join(", ")}</b></p>
             )}
           </div>
           <button type="button" onClick={() => setSummary(null)} aria-label="Dismiss" className="text-violet-500 hover:text-violet-800 shrink-0">

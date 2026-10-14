@@ -11,6 +11,8 @@ export type ScanResult =
       fields: Record<string, string>;
       /** Label field penting yang tidak ditemukan di dokumen. */
       missing: string[];
+      /** Nama field (atribut `name`) dari `missing`, untuk dikosongkan & ditandai di form. */
+      missingFields: string[];
       /** Diisi kalau dokumen tampaknya bukan jenis yang diharapkan form ini. */
       mismatch?: { expected: string; detected: string };
       model: string;
@@ -117,7 +119,7 @@ Rules:
 - Do NOT put text with a different meaning into a field just to fill it: e.g. "Diminta oleh" (requested by) is not "detected by", "Dibutuhkan tanggal" (needed by) is not a due date for closing an NC, and an invoice's item list is not an NC description.
 - If a field is not present or unreadable, use an empty string "".
 - Convert dates to YYYY-MM-DD (Indonesian month names: Januari, Februari, Maret, April, Mei, Juni, Juli, Agustus, September, Oktober, November, Desember).
-- For fields with fixed options, pick the matching option exactly as written; map ticked checkboxes to the option. If nothing matches, use "".
+- For fields with fixed options, fill them ONLY when the document explicitly writes that value or ticks that checkbox; then use the option exactly as written. Never infer an option from other clues (e.g. do not derive the department from a job title like "QC Inspector", or the severity from how bad the problem sounds). If not explicit, use "".
 
 Example of the "fields" object for a correct ${form.title} (different document):
 ${JSON.stringify(form.example, null, 2)}
@@ -171,11 +173,11 @@ Respond ONLY with JSON in this shape:
       };
     }
 
-    const missing = Object.entries(form.fields)
-      .filter(([name, spec]) => !spec.optional && !fields[name])
-      .map(([, spec]) => spec.label);
+    const missingEntries = Object.entries(form.fields).filter(([name, spec]) => !spec.optional && !fields[name]);
+    const missing = missingEntries.map(([, spec]) => spec.label);
+    const missingFields = missingEntries.map(([name]) => name);
 
-    return { ok: true, fields, missing, mismatch, model };
+    return { ok: true, fields, missing, missingFields, mismatch, model };
   } catch (err) {
     console.error("[ai-scan]", err);
     return { ok: false, error: err instanceof AiError ? err.message : "Gagal memproses gambar." };

@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { Plus, Edit, Scale, Activity, FileText, CheckCircle, AlertTriangle, FileBadge, Calendar, Search, Printer } from "lucide-react";
-import ScanDocumentButton, { highlightAiFields } from "@/components/ScanDocumentButton";
+import ScanDocumentButton, { highlightScanFields } from "@/components/ScanDocumentButton";
 import { addCalibrationRecord, updateEquipment, EquipmentItem, CalibrationRecord, uploadCalibrationCertificate, raiseNCRFromEquipment, addPMRecord } from "../actions";
 import { getCalibrationStatus } from "../utils";
 
@@ -32,15 +32,18 @@ function AddRecordModal({ equipment, onClose }: { equipment: EquipmentItem; onCl
   };
 
   // Isi form dari hasil scan sertifikat; gambar scan sekaligus dilampirkan.
-  const applyScan = (fields: Record<string, string>, scanned: File) => {
+  // Field yang tidak ditemukan dikosongkan (termasuk default "Pass" & tanggal
+  // hari ini) agar user wajib mengisinya sendiri.
+  const applyScan = (fields: Record<string, string>, scanned: File, missingFields: string[]) => {
     setForm(prev => {
-      const next = { ...prev, ...fields } as typeof prev;
+      const cleared = Object.fromEntries(missingFields.map(n => [n, ""]));
+      const next = { ...prev, ...cleared, ...fields } as typeof prev;
       if (fields.date && !fields.nextDueDate) next.nextDueDate = addFrequency(fields.date);
       return next;
     });
     if (!file) setFile(scanned);
     // Tunggu render (field masterEquipmentUsed bisa baru muncul) lalu tandai.
-    requestAnimationFrame(() => highlightAiFields(formRef.current, Object.keys(fields)));
+    requestAnimationFrame(() => highlightScanFields(formRef.current, Object.keys(fields), missingFields));
   };
 
   async function handleSubmit(e: React.FormEvent) {
@@ -127,6 +130,8 @@ function AddRecordModal({ equipment, onClose }: { equipment: EquipmentItem; onCl
               <label className="text-xs font-semibold text-slate-600 block mb-1">Result</label>
               <select required name="result" value={form.result} onChange={e => setForm({...form, result: e.target.value as CalibrationRecord["result"]})}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-teal-500 outline-none bg-white">
+                {/* Hanya terpilih saat hasil scan tidak menemukan result */}
+                <option value="" disabled hidden>— Pilih result —</option>
                 <option value="Pass">Pass / Accepted</option>
                 <option value="Adjusted">Pass after Adjustment</option>
                 <option value="Fail">Fail / Rejected</option>
