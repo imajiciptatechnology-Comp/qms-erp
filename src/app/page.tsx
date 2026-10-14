@@ -7,9 +7,18 @@ import {
   Scale, Factory, Truck, Wrench, Flame, HardHat, RefreshCw
 } from "lucide-react";
 import { getDashboardData } from "./dashboard-data";
+import AiInsightsPanel from "@/components/AiInsightsPanel";
+import { getCachedInsights } from "./actions/ai-insights";
+import { isAiConfigured } from "@/lib/ai";
+
+// Server Action "Generate Analysis" memanggil AI dan bisa butuh puluhan detik.
+export const maxDuration = 60;
 
 export default async function Home() {
-  const { kpi, charts, recentNCs, recentIncidents, activeMocList } = await getDashboardData();
+  const [{ kpi, charts, recentNCs, recentIncidents, activeMocList }, aiInsights] = await Promise.all([
+    getDashboardData(),
+    getCachedInsights(),
+  ]);
   const {
     openNCs, overdueNCs, auditsThisMonth, activeMocs, activeRisks, openIncidents,
     welderCount, expiredWelders, maintenanceCount, overdueMaintenance, activeWOs,
@@ -31,6 +40,8 @@ export default async function Home() {
       </div>
 
       {/* ─── Graphical Dashboard ──────────────────────────────────────────── */}
+      <AiInsightsPanel initial={aiInsights} configured={isAiConfigured()} />
+
       <DashboardCharts {...charts} />
 
       {/* ─── Row 1: Core QMS KPIs ──────────────────────────────────────────── */}
