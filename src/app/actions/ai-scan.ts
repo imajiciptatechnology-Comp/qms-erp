@@ -41,7 +41,7 @@ const FORMS: Record<ScanFormType, { title: string; titleId: string; fields: Reco
       department: { label: "Department", description: "Department where the NC occurred", options: ["Top Management", "Quality Assurance", "Production", "Engineering", "HSE", "HR & Admin"] },
       severity: { label: "Severity", description: "NC severity", options: ["Minor", "Major", "Critical"] },
       dueDate: { label: "Due Date", description: "Target date to close the NC / corrective action", date: true },
-      detectedBy: { label: "Detected By", description: "Name and/or position of the person who found it" },
+      detectedBy: { label: "Detected By", description: "Name and/or position of the person who found it. Same meaning as labels like \"Ditemukan oleh\", \"Inspektor\", \"Inspector\", \"Diperiksa oleh\", \"Pemeriksa\", \"Auditor\" or \"Dilaporkan oleh\"" },
       productBatch: { label: "Product / Batch No.", description: "Product, part, or batch/lot number involved" },
       isoClause: { label: "ISO Clause", description: "ISO 9001 clause reference, e.g. 8.5.1", optional: true },
       description: { label: "NC Description", description: "Full description of the problem, location and objective evidence" },
@@ -115,7 +115,7 @@ Step 2 — extract values for these form fields:
 ${fieldList}
 
 Rules:
-- Extract a field whenever the document explicitly states a value with the same meaning, EVEN IF isExpectedDocument is false. Example: a material request with a row "Departemen: Production" → department = "Production"; a row "Produk / No. Batch: X" → productBatch = "X".
+- Extract a field whenever the document explicitly states a value with the same meaning, EVEN IF isExpectedDocument is false. Examples: a row "Departemen: Production" → department = "Production"; a row "Produk / No. Batch: X" → productBatch = "X"; an inspection report row "Inspektor: Andi Wijaya – QC Final" → detectedBy = "Andi Wijaya – QC Final".
 - Do NOT put text with a different meaning into a field just to fill it: e.g. "Diminta oleh" (requested by) is not "detected by", "Dibutuhkan tanggal" (needed by) is not a due date for closing an NC, and an invoice's item list is not an NC description.
 - If a field is not present or unreadable, use an empty string "".
 - Convert dates to YYYY-MM-DD (Indonesian month names: Januari, Februari, Maret, April, Mei, Juni, Juli, Agustus, September, Oktober, November, Desember).
