@@ -6,27 +6,43 @@ import { getJson, setJson } from "@/lib/kvStore";
 
 export type ScanFormType = "nc" | "calibration";
 export type ScanResult =
-  | { ok: true; fields: Record<string, string>; model: string }
+  | {
+      ok: true;
+      fields: Record<string, string>;
+      /** Label field penting yang tidak ditemukan di dokumen. */
+      missing: string[];
+      /** Diisi kalau dokumen tampaknya bukan jenis yang diharapkan form ini. */
+      mismatch?: { expected: string; detected: string };
+      model: string;
+    }
   | { ok: false; error: string };
 
-type FieldSpec = { description: string; options?: string[]; date?: boolean };
+type FieldSpec = {
+  label: string;
+  description: string;
+  options?: string[];
+  date?: boolean;
+  /** Tidak dilaporkan sebagai "tidak ditemukan" kalau kosong. */
+  optional?: boolean;
+};
 
 /**
  * Definisi field per form: nama field = atribut `name`/key state di form ERP.
  * `options` membatasi nilai ke pilihan dropdown yang valid.
  */
-const FORMS: Record<ScanFormType, { title: string; fields: Record<string, FieldSpec>; example: Record<string, string> }> = {
+const FORMS: Record<ScanFormType, { title: string; titleId: string; fields: Record<string, FieldSpec>; example: Record<string, string> }> = {
   nc: {
     title: "Non-Conformance Report (NCR)",
+    titleId: "form NCR / laporan ketidaksesuaian",
     fields: {
-      source: { description: "Where the NC came from", options: ["Internal Audit", "Customer Complaint", "Process Monitoring", "Supplier Issue", "Management Review", "Other"] },
-      department: { description: "Department where the NC occurred", options: ["Top Management", "Quality Assurance", "Production", "Engineering", "HSE", "HR & Admin"] },
-      severity: { description: "NC severity", options: ["Minor", "Major", "Critical"] },
-      dueDate: { description: "Target date to close the NC / corrective action", date: true },
-      detectedBy: { description: "Name and/or position of the person who found it" },
-      productBatch: { description: "Product, part, or batch/lot number involved" },
-      isoClause: { description: "ISO 9001 clause reference, e.g. 8.5.1" },
-      description: { description: "Full description of the problem, location and objective evidence" },
+      source: { label: "Source", description: "Where the NC came from", options: ["Internal Audit", "Customer Complaint", "Process Monitoring", "Supplier Issue", "Management Review", "Other"] },
+      department: { label: "Department", description: "Department where the NC occurred", options: ["Top Management", "Quality Assurance", "Production", "Engineering", "HSE", "HR & Admin"] },
+      severity: { label: "Severity", description: "NC severity", options: ["Minor", "Major", "Critical"] },
+      dueDate: { label: "Due Date", description: "Target date to close the NC / corrective action", date: true },
+      detectedBy: { label: "Detected By", description: "Name and/or position of the person who found it" },
+      productBatch: { label: "Product / Batch No.", description: "Product, part, or batch/lot number involved" },
+      isoClause: { label: "ISO Clause", description: "ISO 9001 clause reference, e.g. 8.5.1", optional: true },
+      description: { label: "NC Description", description: "Full description of the problem, location and objective evidence" },
     },
     example: {
       source: "Process Monitoring",
@@ -41,14 +57,16 @@ const FORMS: Record<ScanFormType, { title: string; fields: Record<string, FieldS
   },
   calibration: {
     title: "Calibration Certificate",
+    titleId: "sertifikat kalibrasi",
     fields: {
-      date: { description: "Date the calibration was performed", date: true },
-      nextDueDate: { description: "Next calibration due date / recommended recalibration date, if printed", date: true },
-      certificateNo: { description: "Certificate number" },
-      calibratedBy: { description: "Calibration laboratory / company name (or 'Internal Lab')" },
-      result: { description: "Overall result: Pass = within tolerance, Adjusted = passed after adjustment, Fail = out of tolerance/rejected", options: ["Pass", "Adjusted", "Fail"] },
-      masterEquipmentUsed: { description: "Reference/master standard used, if listed" },
-      remarks: { description: "Short summary of measured results, uncertainty, or notes on the certificate" },
+      date: { label: "Calibration Date", description: "Date the calibration was performed", date: true },
+      // Kalau kosong, form menghitungnya dari frekuensi kalibrasi alat.
+      nextDueDate: { label: "Next Due Date", description: "Next calibration due date / recommended recalibration date, if printed", date: true, optional: true },
+      certificateNo: { label: "Certificate Number", description: "Certificate number" },
+      calibratedBy: { label: "Calibrated By", description: "Calibration laboratory / company name (or 'Internal Lab')" },
+      result: { label: "Result", description: "Overall result: Pass = within tolerance, Adjusted = passed after adjustment, Fail = out of tolerance/rejected", options: ["Pass", "Adjusted", "Fail"] },
+      masterEquipmentUsed: { label: "Master Equipment", description: "Reference/master standard used, if listed", optional: true },
+      remarks: { label: "Remarks", description: "Short summary of measured results, uncertainty, or notes on the certificate", optional: true },
     },
     example: {
       date: "2026-03-10",
@@ -86,22 +104,25 @@ export async function scanDocument(formType: ScanFormType, imageDataUrl: string)
     .map(([name, f]) => `- "${name}": ${f.description}${f.options ? ` — must be exactly one of: ${f.options.join(" | ")}` : ""}${f.date ? " — format YYYY-MM-DD" : ""}`)
     .join("\n");
 
-  const prompt = `This image is a scanned or photographed ${form.title} (it may be in Indonesian or English, printed or handwritten).
-Extract the values needed to fill the ERP form fields below.
+  const prompt = `The user is filling an ERP form for a ${form.title} and uploaded this image (a scan or photo, Indonesian or English, printed or handwritten).
 
-Fields:
+Step 1 — identify the document. Decide what kind of document the image actually shows (e.g. "NCR form", "calibration certificate", "invoice", "delivery note", "purchase order", "inspection report", "photo, not a document").
+Set "isExpectedDocument" to true only if it really is a ${form.title} or an equivalent document for the same purpose. Set "detectedDocumentType" to a short name of what it is, in Indonesian.
+
+Step 2 — extract values for these form fields:
 ${fieldList}
 
 Rules:
-- Only use information visible in the image. If a field is not present or unreadable, use an empty string "".
+- Only use information that is explicitly in the image for that field. Do NOT put unrelated text into a field just to fill it (e.g. never copy an invoice's item list into "description").
+- If a field is not present or unreadable, use an empty string "".
 - Convert dates to YYYY-MM-DD (Indonesian month names: Januari, Februari, Maret, April, Mei, Juni, Juli, Agustus, September, Oktober, November, Desember).
-- For fields with fixed options, pick the closest matching option exactly as written; map ticked checkboxes to the option.
-- Keep the description/remarks text faithful to the document; you may join lines into sentences.
+- For fields with fixed options, pick the matching option exactly as written; map ticked checkboxes to the option. If nothing matches, use "".
 
-Example of a correctly filled answer (different document):
+Example of the "fields" object for a correct ${form.title} (different document):
 ${JSON.stringify(form.example, null, 2)}
 
-Respond ONLY with a JSON object containing exactly these keys: ${Object.keys(form.fields).join(", ")}.`;
+Respond ONLY with JSON in this shape:
+{ "isExpectedDocument": true|false, "detectedDocumentType": "…", "fields": { ${Object.keys(form.fields).map(k => `"${k}": "…"`).join(", ")} } }`;
 
   try {
     const { text, model } = await aiComplete(
@@ -118,10 +139,12 @@ Respond ONLY with a JSON object containing exactly these keys: ${Object.keys(for
     );
     await setJson(usageKey, used + 1);
 
-    const raw = parseAiJson<Record<string, unknown>>(text);
+    const raw = parseAiJson<{ isExpectedDocument?: unknown; detectedDocumentType?: unknown; fields?: Record<string, unknown> }>(text);
+    const rawFields = raw.fields && typeof raw.fields === "object" ? raw.fields : (raw as Record<string, unknown>);
+
     const fields: Record<string, string> = {};
     for (const [name, spec] of Object.entries(form.fields)) {
-      const value = typeof raw[name] === "string" ? (raw[name] as string).trim() : "";
+      const value = typeof rawFields[name] === "string" ? (rawFields[name] as string).trim() : "";
       if (!value) continue;
       if (spec.options) {
         const match = spec.options.find(o => o.toLowerCase() === value.toLowerCase());
@@ -133,10 +156,25 @@ Respond ONLY with a JSON object containing exactly these keys: ${Object.keys(for
       }
     }
 
+    const detected = typeof raw.detectedDocumentType === "string" && raw.detectedDocumentType.trim()
+      ? raw.detectedDocumentType.trim().slice(0, 80)
+      : "dokumen lain";
+    const mismatch = raw.isExpectedDocument === false ? { expected: form.titleId, detected } : undefined;
+
     if (Object.keys(fields).length === 0) {
-      return { ok: false, error: "AI tidak menemukan data yang cocok di gambar ini. Pastikan foto jelas dan sesuai jenis form." };
+      return {
+        ok: false,
+        error: mismatch
+          ? `Dokumen ini terbaca sebagai "${detected}", bukan ${form.titleId}. Tidak ada field yang bisa diisi.`
+          : "AI tidak menemukan data yang cocok di gambar ini. Pastikan foto jelas dan sesuai jenis form.",
+      };
     }
-    return { ok: true, fields, model };
+
+    const missing = Object.entries(form.fields)
+      .filter(([name, spec]) => !spec.optional && !fields[name])
+      .map(([, spec]) => spec.label);
+
+    return { ok: true, fields, missing, mismatch, model };
   } catch (err) {
     console.error("[ai-scan]", err);
     return { ok: false, error: err instanceof AiError ? err.message : "Gagal memproses gambar." };
