@@ -22,10 +22,13 @@ export class AiError extends Error {
   }
 }
 
+// Buang spasi & BOM yang kadang ikut tertempel saat mengisi env.
+const env = (name: string) => process.env[name]?.replace(/^﻿/, "").trim();
+
 function getConfig() {
-  const baseUrl = process.env.AI_BASE_URL;
-  const apiKey = process.env.AI_API_KEY;
-  const model = process.env.AI_MODEL;
+  const baseUrl = env("AI_BASE_URL");
+  const apiKey = env("AI_API_KEY");
+  const model = env("AI_MODEL");
   if (!baseUrl || !apiKey || !model) {
     throw new AiError("AI belum dikonfigurasi. Set AI_BASE_URL, AI_API_KEY, dan AI_MODEL di environment.");
   }
@@ -33,7 +36,7 @@ function getConfig() {
 }
 
 export function isAiConfigured() {
-  return Boolean(process.env.AI_BASE_URL && process.env.AI_API_KEY && process.env.AI_MODEL);
+  return Boolean(env("AI_BASE_URL") && env("AI_API_KEY") && env("AI_MODEL"));
 }
 
 /** Panggil model dan kembalikan teks jawabannya. Retry sekali untuk 429/5xx. */
