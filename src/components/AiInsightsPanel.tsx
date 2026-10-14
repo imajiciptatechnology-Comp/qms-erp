@@ -11,7 +11,8 @@ const SEVERITY_STYLE = {
 } as const;
 
 function formatTime(iso: string) {
-  return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short" });
+  // Zona waktu dikunci supaya hasil render server (UTC) sama dengan browser.
+  return new Date(iso).toLocaleString("id-ID", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Jakarta" }) + " WIB";
 }
 
 export default function AiInsightsPanel({ initial, configured }: { initial: AiInsightsResult | null; configured: boolean }) {
@@ -35,7 +36,7 @@ export default function AiInsightsPanel({ initial, configured }: { initial: AiIn
           <h3 className="font-bold text-slate-800 flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-violet-500" /> AI Insights
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
+          <p className="text-xs text-slate-500 mt-0.5" suppressHydrationWarning>
             {data
               ? `Last analysis ${formatTime(data.generatedAt)} by ${data.generatedBy} · ${data.model}`
               : "AI analysis across all QMS modules"}
