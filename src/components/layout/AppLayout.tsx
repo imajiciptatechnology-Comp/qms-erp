@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
 import { logout } from "@/app/actions/auth";
+import AiAssistant from "@/components/AiAssistant";
 
 export default function AppLayout({ children, user, rolesConfig }: { children: React.ReactNode, user: any, rolesConfig: any[] }) {
   const pathname = usePathname();
@@ -56,6 +57,9 @@ export default function AppLayout({ children, user, rolesConfig }: { children: R
           {children}
         </main>
       </div>
+
+      <AiAssistant />
+
     </div>
   );
 }

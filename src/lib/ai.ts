@@ -98,6 +98,84 @@ export async function aiComplete(
   throw new AiError("Model AI sedang sibuk. Coba lagi beberapa saat lagi.", lastStatus);
 }
 
+/**
+ * Versi streaming: kembalikan stream teks biasa (potongan jawaban) supaya
+ * jawaban muncul bertahap di UI. Fallback model berlaku sampai ada model yang
+ * mulai menjawab; setelah stream berjalan tidak bisa pindah model lagi.
+ */
+export async function aiStream(
+  messages: AiMessage[],
+  opts: { maxTokens?: number; temperature?: number } = {}
+): Promise<{ stream: ReadableStream<Uint8Array>; model: string }> {
+  const { baseUrl, apiKey, models } = getConfig();
+  const deadline = Date.now() + 55_000;
+  let lastStatus: number | undefined;
+
+  for (const model of models) {
+    const remaining = deadline - Date.now();
+    if (remaining < 5_000) break;
+
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+          temperature: opts.temperature ?? 0.3,
+          max_tokens: opts.maxTokens ?? 1500,
+        }),
+        signal: AbortSignal.timeout(remaining),
+      });
+    } catch (err) {
+      console.warn(`[ai] ${model} gagal/timeout, coba model berikutnya`, err);
+      continue;
+    }
+
+    if (!res.ok || !res.body) {
+      lastStatus = res.status;
+      const detail = (await res.text()).slice(0, 300);
+      if (res.status === 429 || res.status >= 500) {
+        console.warn(`[ai] ${model} → ${res.status}, coba model berikutnya: ${detail}`);
+        continue;
+      }
+      throw new AiError(`Permintaan AI gagal (${res.status}): ${detail}`, res.status);
+    }
+
+    // Ubah SSE "data: {...}" dari provider menjadi potongan teks biasa.
+    const decoder = new TextDecoder();
+    const encoder = new TextEncoder();
+    let buffer = "";
+    const stream = res.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          buffer += decoder.decode(chunk, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith("data:")) continue;
+            const payload = trimmed.slice(5).trim();
+            if (!payload || payload === "[DONE]") continue;
+            try {
+              const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content;
+              if (delta) controller.enqueue(encoder.encode(delta));
+            } catch {
+              // potongan JSON tidak lengkap/aneh: abaikan
+            }
+          }
+        },
+      })
+    );
+    return { stream, model };
+  }
+
+  if (lastStatus === 429) throw new AiError("Kuota AI gratis sedang habis/terbatas. Coba lagi beberapa saat lagi.", 429);
+  throw new AiError("Model AI sedang sibuk. Coba lagi beberapa saat lagi.", lastStatus);
+}
+
 /** Ambil objek JSON dari jawaban model (toleran terhadap ```json fence```). */
 export function parseAiJson<T>(text: string): T {
   const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
