@@ -54,9 +54,13 @@ export async function aiComplete(
   const deadline = Date.now() + 55_000; // di bawah maxDuration 60 detik
   let lastStatus: number | undefined;
 
-  for (const model of models) {
+  for (const [i, model] of models.entries()) {
     const remaining = deadline - Date.now();
     if (remaining < 5_000) break;
+    // Model yang menggantung tidak boleh menghabiskan seluruh waktu:
+    // batasi tiap percobaan supaya fallback masih sempat dicoba.
+    const isLast = i === models.length - 1;
+    const attemptMs = isLast ? remaining : Math.min(remaining, 25_000);
 
     let res: Response;
     try {
@@ -70,7 +74,7 @@ export async function aiComplete(
           max_tokens: opts.maxTokens ?? 2048,
           ...(opts.json ? { response_format: { type: "json_object" } } : {}),
         }),
-        signal: AbortSignal.timeout(remaining),
+        signal: AbortSignal.timeout(attemptMs),
       });
     } catch (err) {
       console.warn(`[ai] ${model} gagal/timeout, coba model berikutnya`, err);
