@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import { logout } from "@/app/actions/auth";
 
 export default function AppLayout({ children, user, rolesConfig }: { children: React.ReactNode, user: any, rolesConfig: any[] }) {
   const pathname = usePathname();
@@ -12,7 +13,11 @@ export default function AppLayout({ children, user, rolesConfig }: { children: R
 
   useEffect(() => {
     if (!user && pathname !== "/login") {
-      router.push("/login");
+      // Token bisa saja valid tapi user-nya sudah tidak ada di database.
+      // Hapus cookie dulu, kalau tidak middleware melempar /login balik ke / (loop, layar putih).
+      logout().finally(() => {
+        window.location.href = "/login";
+      });
     } else if (user && pathname === "/login") {
       router.push("/");
     }
