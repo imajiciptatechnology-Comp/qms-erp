@@ -61,3 +61,10 @@ next-env.d.ts
 .mock-auth.ts
 .mock-next-cache.js
 .mock-next-headers.js
+
+# supabase cli local state
+/supabase/.temp
+
+.vercel
+.env*
+/CREDENTIALS.local.md
