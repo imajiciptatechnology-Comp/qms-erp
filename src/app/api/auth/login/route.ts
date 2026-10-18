@@ -3,9 +3,15 @@ import { prisma } from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import * as jose from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode(process.env.JWT_SECRET || 'super-secret-key-for-qms-erp');
-
 export async function POST(req: Request) {
+  // Tanpa JWT_SECRET jangan pernah menandatangani token (dulu ada kunci cadangan
+  // yang tertulis di kode, sehingga token bisa dipalsukan).
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: 'Server auth is not configured' }, { status: 500 });
+  }
+  const JWT_SECRET = new TextEncoder().encode(secret);
+
   try {
     const { email, password } = await req.json();
 

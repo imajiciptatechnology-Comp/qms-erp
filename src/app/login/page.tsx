@@ -63,7 +63,7 @@ export default function LoginPage() {
                 <input
                   type="email"
                   name="email"
-                  defaultValue="admin@qms.com"
+                  autoComplete="username"
                   placeholder="name@company.com"
                   required
                   className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-slate-900 placeholder:text-slate-400 bg-slate-50 focus:bg-white transition-all"
@@ -78,7 +78,7 @@ export default function LoginPage() {
                 <input
                   type="password"
                   name="password"
-                  defaultValue="admin123"
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   required
                   className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-slate-900 placeholder:text-slate-400 bg-slate-50 focus:bg-white transition-all"
@@ -101,13 +101,6 @@ export default function LoginPage() {
               {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Sign In"}
             </button>
           </form>
-
-          <div className="mt-6 text-sm text-center text-slate-500">
-            <p><strong>Akun Test:</strong></p>
-            <p>Admin: admin@qms.com | admin123</p>
-            <p>Manager: manager@qms.com | manager123</p>
-            <p>Staff: staff@qms.com | staff123</p>
-          </div>
         </div>
       </div>
     </div>
