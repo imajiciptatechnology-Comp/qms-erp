@@ -1,13 +1,15 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Sparkles, RefreshCw, AlertTriangle, AlertOctagon, Info } from "lucide-react";
+import { FileSearch, RefreshCw, AlertTriangle, AlertOctagon, Info, Loader2 } from "lucide-react";
 import { generateInsights, type AiInsightsResult } from "@/app/actions/ai-insights";
 
-const SEVERITY_STYLE = {
-  critical: { box: "border-red-200 bg-red-50/40", badge: "bg-red-100 text-red-700", Icon: AlertOctagon, icon: "text-red-500" },
-  warning: { box: "border-amber-200 bg-amber-50/40", badge: "bg-amber-100 text-amber-700", Icon: AlertTriangle, icon: "text-amber-500" },
-  info: { box: "border-slate-200 bg-white", badge: "bg-blue-100 text-blue-700", Icon: Info, icon: "text-blue-500" },
+// Warna semantik yang sama dengan badge status di modul lain (merah/kuning/biru),
+// selalu dipasangkan dengan ikon + teks agar tidak bergantung pada warna saja.
+const SEVERITY = {
+  critical: { label: "Critical", Icon: AlertOctagon, pill: "bg-red-50 text-red-700 ring-red-200" },
+  warning: { label: "Warning", Icon: AlertTriangle, pill: "bg-amber-50 text-amber-800 ring-amber-200" },
+  info: { label: "Info", Icon: Info, pill: "bg-blue-50 text-blue-700 ring-blue-200" },
 } as const;
 
 function formatTime(iso: string) {
@@ -29,72 +31,102 @@ export default function AiInsightsPanel({ initial, configured }: { initial: AiIn
     });
   };
 
+  const counts = data
+    ? (["critical", "warning", "info"] as const).map(k => ({ k, n: data.insights.filter(i => i.severity === k).length })).filter(c => c.n > 0)
+    : [];
+
   return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm shadow-slate-900/5 overflow-hidden">
+    <section className="bg-white rounded-xl border border-slate-200 shadow-sm shadow-slate-900/5 overflow-hidden" aria-labelledby="qms-analysis-title">
       <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-violet-500" /> AI Insights
+        <div className="min-w-0">
+          <h3 id="qms-analysis-title" className="font-bold text-slate-800 flex items-center gap-2">
+            <FileSearch className="w-5 h-5 text-blue-600" /> QMS Analysis
           </h3>
           <p className="text-xs text-slate-500 mt-0.5" suppressHydrationWarning>
             {data
-              ? `Last analysis ${formatTime(data.generatedAt)} by ${data.generatedBy} · ${data.model}`
-              : "AI analysis across all QMS modules"}
+              ? `AI review of all modules · ${formatTime(data.generatedAt)} · by ${data.generatedBy}`
+              : "AI review of all modules: findings and recommended actions"}
           </p>
         </div>
         <button
           onClick={run}
           disabled={isPending || !configured}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         >
-          <RefreshCw className={`w-4 h-4 ${isPending ? "animate-spin" : ""}`} />
-          {isPending ? "Analysing…" : data ? "Re-analyse" : "Generate Analysis"}
+          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+          {isPending ? "Analysing…" : data ? "Refresh analysis" : "Run analysis"}
         </button>
       </div>
 
-      <div className="p-6 space-y-4">
-        {!configured && (
-          <p className="text-sm text-slate-500">AI is not configured yet. Set <code>AI_API_KEY</code> in the environment to enable it.</p>
-        )}
-        {error && <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>}
+      {!configured && (
+        <p className="px-6 py-5 text-sm text-slate-600">AI is not configured yet. Set <code>AI_API_KEY</code> in the environment to enable it.</p>
+      )}
+      {error && (
+        <p role="alert" className="mx-6 mt-4 text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>
+      )}
 
-        {isPending && !data && (
-          <div className="space-y-3 animate-pulse">
-            {[0, 1, 2].map(i => <div key={i} className="h-16 rounded-lg bg-slate-100" />)}
-          </div>
-        )}
-
-        {!data && !isPending && configured && !error && (
-          <p className="text-sm text-slate-500">No analysis yet. Click <b>Generate Analysis</b> to let AI review every module.</p>
-        )}
-
-        {data && (
-          <>
-            {data.summary && <p className="text-sm text-slate-700 leading-relaxed">{data.summary}</p>}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-              {data.insights.map((ins, idx) => {
-                const s = SEVERITY_STYLE[ins.severity] ?? SEVERITY_STYLE.info;
-                return (
-                  <div key={idx} className={`rounded-lg border p-4 ${s.box}`}>
-                    <div className="flex items-start gap-3">
-                      <s.Icon className={`w-5 h-5 shrink-0 mt-0.5 ${s.icon}`} />
-                      <div className="min-w-0 space-y-1.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{ins.module}</span>
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${s.badge}`}>{ins.severity}</span>
-                        </div>
-                        <p className="font-semibold text-sm text-slate-800">{ins.title}</p>
-                        <p className="text-xs text-slate-600">{ins.finding}</p>
-                        <p className="text-xs text-slate-800"><span className="font-semibold">Recommendation: </span>{ins.recommendation}</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+      {isPending && !data && (
+        <div className="divide-y divide-slate-100" aria-busy="true" aria-label="Running analysis">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="px-6 py-4 flex gap-4 animate-pulse">
+              <div className="h-5 w-20 rounded bg-slate-100" />
+              <div className="flex-1 space-y-2"><div className="h-4 w-1/2 rounded bg-slate-100" /><div className="h-3 w-5/6 rounded bg-slate-100" /></div>
             </div>
-          </>
-        )}
-      </div>
-    </div>
+          ))}
+        </div>
+      )}
+
+      {!data && !isPending && configured && !error && (
+        <p className="px-6 py-5 text-sm text-slate-600">
+          No analysis yet. <b>Run analysis</b> reviews every module (NC, audit, calibration, risk, training, HSE and more) and lists what needs attention first.
+        </p>
+      )}
+
+      {data && (
+        <>
+          {(data.summary || counts.length > 0) && (
+            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/60 space-y-2">
+              {counts.length > 0 && (
+                <p className="flex flex-wrap gap-2 text-xs">
+                  {counts.map(({ k, n }) => {
+                    const s = SEVERITY[k];
+                    return (
+                      <span key={k} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-semibold ring-1 ring-inset ${s.pill}`}>
+                        <s.Icon className="w-3.5 h-3.5" aria-hidden="true" /> {n} {s.label}
+                      </span>
+                    );
+                  })}
+                </p>
+              )}
+              {data.summary && <p className="text-sm text-slate-700 leading-relaxed max-w-[80ch]">{data.summary}</p>}
+            </div>
+          )}
+
+          <ol className="divide-y divide-slate-100">
+            {data.insights.map((ins, idx) => {
+              const s = SEVERITY[ins.severity] ?? SEVERITY.info;
+              return (
+                <li key={idx} className="px-6 py-4 grid gap-x-5 gap-y-2 sm:grid-cols-[8.5rem_minmax(0,1fr)]">
+                  <div className="flex sm:flex-col items-start gap-2">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold ring-1 ring-inset ${s.pill}`}>
+                      <s.Icon className="w-3.5 h-3.5" aria-hidden="true" /> {s.label}
+                    </span>
+                    <span className="text-xs font-medium text-slate-500">{ins.module}</span>
+                  </div>
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-semibold text-sm text-slate-800">{ins.title}</p>
+                    <p className="text-sm text-slate-600">{ins.finding}</p>
+                    <p className="text-sm text-slate-800"><span className="font-semibold text-slate-900">Action: </span>{ins.recommendation}</p>
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+          <p className="px-6 py-2.5 border-t border-slate-100 text-[11px] text-slate-500">
+            Generated by AI ({data.model}) from module data. Verify before acting.
+          </p>
+        </>
+      )}
+    </section>
   );
 }
