@@ -1,27 +1,55 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser } from "@/app/actions/auth";
-import { getAssistantContext } from "@/app/ai-context";
-import { aiStream, AiError, isAiConfigured, type AiMessage } from "@/lib/ai";
+import { getCurrentUser, getRolesConfig, type CurrentUser } from "@/app/actions/auth";
+import { aiAgentStep, AiError, isAiConfigured, type AiMessage } from "@/lib/ai";
 import { getJson, setJson } from "@/lib/kvStore";
+import { AGENT_TOOLS, runTool, toolStatus, type AgentEvent, type ToolContext } from "@/app/ai-agent/tools";
+import { AGENT_MODULES, AGENT_PAGES } from "@/app/ai-agent/modules";
 
 export const maxDuration = 60;
 
-const DAILY_LIMIT = 40; // pesan per user per hari (hemat kuota tier gratis)
+const DAILY_LIMIT = 40; // pertanyaan per user per hari (hemat kuota tier gratis)
 const MAX_HISTORY = 10;
 const MAX_CHARS = 2000;
+const MAX_STEPS = 5; // panggilan model per pertanyaan
+const TIME_BUDGET_MS = 52_000; // di bawah maxDuration
 
-const SYSTEM_PROMPT = `You are "QMS Assistant", the AI assistant inside a QMS ERP system (ISO 9001) used by an Indonesian manufacturing company.
-You help users understand their quality data: non-conformances (NC/NCR), customer complaints, calibration, risks, training, audits, documents, suppliers, HSE incidents, MOC, production work orders, maintenance and welders.
+function systemPrompt(user: CurrentUser, page: string, modules: string[]) {
+  return `You are "QMS Assistant", an AI assistant inside a QMS ERP (ISO 9001) used by an Indonesian manufacturing company.
+You can look up data AND act in the app through tools: search records, open pages or records on the user's screen, offer file downloads, and export lists to CSV.
 
 Rules:
-- Answer ONLY from the ERP data snapshot provided below. Never invent records, numbers, names or dates. If the data does not contain the answer, say so plainly.
-- Quote record numbers (e.g. NC-1234, risk numbers, serial numbers) so users can find them. Compare dates against "today" to decide what is overdue or due soon.
-- You are read-only: you cannot create, edit or delete data. If asked to, explain which module/menu the user should use instead.
-- You may give ISO 9001 guidance (cite clauses) and practical quality-management advice.
-- Reply in the same language the user writes in (Bahasa Indonesia or English).
-- Be concise. Use short paragraphs, **bold** for key items and "- " bullet lists. No tables, no headings.`;
+- Get facts ONLY from tools. Never invent records, numbers, names, dates or files. If a tool finds nothing, say so.
+- When the user asks to open/show a page or record, call open_page / open_record. To download a file, call download_file. To export a list, call export_records. Do not just describe how to do it.
+- If a lookup returns several candidates, ask the user which one (list their refs) instead of guessing.
+- Use as few tool calls as possible; prefer one search with a good filter. Compare dates with today (${new Date().toISOString().split("T")[0]}) for overdue/due soon.
+- You cannot create, edit, approve or delete data. If asked, explain which page to use and offer to open it.
+- You may give ISO 9001 guidance (cite clauses).
+- Reply in the user's language (Bahasa Indonesia or English). Be concise: short paragraphs, **bold** key items, "- " bullets. Mention record refs (e.g. NC-3400). After an action, confirm it in one short sentence.
+
+User: ${user.name} (${user.role}, ${user.department}). Current page: ${page}.
+Modules this user may access: ${modules.join(", ") || "none"}.`;
+}
 
 type IncomingMessage = { role: "user" | "assistant"; content: string };
+
+/** "buka NC-3400" → langsung buka tanpa memanggil AI (instan & tanpa kuota). */
+async function tryFastOpen(text: string, ctx: ToolContext): Promise<boolean> {
+  const m = text.trim().match(/^(?:tolong\s+)?(?:buka|bukakan|open|lihat)\s+([A-Za-z]{2,}[-/][\w\-/.]+)\s*$/i);
+  if (!m) return false;
+  const ref = m[1];
+  for (const mod of Object.values(AGENT_MODULES)) {
+    if (!mod.detailPath || mod.refField === "id" || !ctx.canAccess(mod.perm)) continue;
+    const row = await mod.table().findFirst({ where: { [mod.refField]: { equals: ref, mode: "insensitive" } }, select: { id: true, [mod.refField]: true } });
+    if (row) {
+      const label = String(row[mod.refField]);
+      ctx.emit({ t: "navigate", path: mod.detailPath(row.id), label });
+      ctx.emit({ t: "text", text: `Membuka **${label}** (${mod.label}).` });
+      ctx.emit({ t: "done" });
+      return true;
+    }
+  }
+  return false;
+}
 
 export async function POST(req: Request) {
   // /api tidak dilindungi middleware, jadi cek login di sini.
@@ -44,37 +72,99 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Pesan kosong." }, { status: 400 });
   }
 
-  // Batas pemakaian harian per user.
   const usageKey = `ai_chat_usage:${user.id}:${new Date().toISOString().split("T")[0]}`;
   const used = await getJson<number>(usageKey, 0);
-  if (used >= DAILY_LIMIT) {
-    return NextResponse.json({ error: `Batas ${DAILY_LIMIT} pesan AI per hari sudah tercapai. Coba lagi besok.` }, { status: 429 });
-  }
 
-  try {
-    const context = await getAssistantContext();
-    const page = typeof body.page === "string" ? body.page.slice(0, 100) : "/";
-    const messages: AiMessage[] = [
-      {
-        role: "system",
-        content: `${SYSTEM_PROMPT}\n\nCurrent user: ${user.name} (${user.role}, ${user.department}). They are viewing page: ${page}.\n\nERP data snapshot (JSON):\n${JSON.stringify(context)}`,
-      },
-      ...history,
-    ];
+  // Hak akses modul mengikuti rolesConfig, sama seperti menu Sidebar.
+  const rolesConfig = await getRolesConfig();
+  const role = rolesConfig.find((r: any) => r.name === user.role);
+  const canAccess = (perm?: string) => {
+    if (!perm) return true;
+    if (!role) return false;
+    return role.permissions.includes("all") || role.permissions.includes(perm);
+  };
+  const page = typeof body.page === "string" ? body.page.slice(0, 100) : "/";
 
-    const { stream, model } = await aiStream(messages);
-    await setJson(usageKey, used + 1);
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let acted = false;
+      const emit = (e: AgentEvent) => {
+        if (e.t === "navigate" || e.t === "download" || e.t === "export") acted = true;
+        controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+      };
+      const ctx: ToolContext = { user, canAccess, emit };
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
-        "X-AI-Model": model,
-      },
-    });
-  } catch (err) {
-    console.error("[ai-chat]", err);
-    const message = err instanceof AiError ? err.message : "Gagal menghubungi AI.";
-    return NextResponse.json({ error: message }, { status: err instanceof AiError && err.status === 429 ? 429 : 502 });
-  }
+      try {
+        if (await tryFastOpen(history[history.length - 1].content, ctx)) return;
+
+        if (used >= DAILY_LIMIT) {
+          emit({ t: "error", message: `Batas ${DAILY_LIMIT} pertanyaan AI per hari sudah tercapai. Coba lagi besok.` });
+          return;
+        }
+
+        const accessible = Object.entries(AGENT_PAGES).filter(([, p]) => canAccess(p.perm)).map(([id]) => id);
+        const messages: AiMessage[] = [{ role: "system", content: systemPrompt(user, page, accessible) }, ...history];
+        const deadline = Date.now() + TIME_BUDGET_MS;
+        let counted = false;
+        let model: string | undefined;
+
+        for (let step = 0; step < MAX_STEPS; step++) {
+          const remaining = deadline - Date.now();
+          if (remaining < 6_000) break;
+          // Langkah terakhir / waktu tipis: paksa model langsung menjawab.
+          const mustAnswer = step === MAX_STEPS - 1 || remaining < 15_000;
+
+          const res = await aiAgentStep(messages, AGENT_TOOLS, { deadline, toolChoice: mustAnswer ? "none" : "auto" });
+          model = res.model;
+          if (!counted) {
+            await setJson(usageKey, used + 1);
+            counted = true;
+          }
+
+          const calls = mustAnswer ? [] : res.message.tool_calls ?? [];
+          if (calls.length === 0) {
+            const text = typeof res.message.content === "string" ? res.message.content.trim() : "";
+            emit({ t: "text", text: text || (acted ? "Selesai." : "Maaf, AI tidak memberikan jawaban. Coba ulangi pertanyaannya.") });
+            emit({ t: "done", model });
+            return;
+          }
+
+          messages.push(res.message);
+          for (const call of calls) {
+            let args: Record<string, any> = {};
+            try {
+              args = JSON.parse(call.function.arguments || "{}");
+            } catch {
+              // argumen rusak: biarkan kosong, tool akan mengembalikan error
+            }
+            emit({ t: "status", text: toolStatus(call.function.name, args) });
+            let result: unknown;
+            try {
+              result = await runTool(call.function.name, args, ctx);
+            } catch (err) {
+              console.error("[ai-chat] tool", call.function.name, err);
+              result = { error: "Tool gagal dijalankan." };
+            }
+            messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 12_000) });
+          }
+        }
+
+        // Waktu/langkah habis sebelum model sempat menjawab.
+        emit(acted
+          ? { t: "text", text: "Selesai." }
+          : { t: "error", message: "AI terlalu lama menjawab. Coba pertanyaan yang lebih spesifik atau ulangi sebentar lagi." });
+        emit({ t: "done", model });
+      } catch (err) {
+        console.error("[ai-chat]", err);
+        emit({ t: "error", message: err instanceof AiError ? err.message : "Gagal menghubungi AI." });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
+  });
 }

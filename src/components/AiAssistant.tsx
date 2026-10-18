@@ -1,17 +1,43 @@
 "use client";
 
 import { Fragment, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
-import { Sparkles, X, Send, RotateCcw } from "lucide-react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { Sparkles, X, Send, RotateCcw, ArrowRight, Download, FileSpreadsheet, Loader2 } from "lucide-react";
+import { downloadCSV } from "@/lib/exportUtils";
 
-type ChatMessage = { role: "user" | "assistant"; content: string };
+type ChatAction =
+  | { kind: "navigate"; path: string; label: string }
+  | { kind: "download"; name: string; url: string }
+  | { kind: "export"; filename: string; rows: Record<string, unknown>[] };
+
+type ChatMessage = { role: "user" | "assistant"; content: string; actions?: ChatAction[]; status?: string; error?: boolean };
+
+/** Event NDJSON dari /api/ai/chat (lihat AgentEvent di src/app/ai-agent/tools.ts). */
+type ServerEvent =
+  | { t: "status"; text: string }
+  | { t: "text"; text: string }
+  | { t: "navigate"; path: string; label: string }
+  | { t: "download"; name: string; url: string }
+  | { t: "export"; filename: string; rows: Record<string, unknown>[] }
+  | { t: "error"; message: string }
+  | { t: "done"; model?: string };
 
 const SUGGESTIONS = [
-  "NC mana saja yang sudah overdue?",
   "Ringkas kondisi QMS hari ini",
-  "Alat apa yang kalibrasinya jatuh tempo?",
-  "Risiko level High apa saja yang masih open?",
+  "Tampilkan NC yang overdue lalu buka yang paling lama",
+  "Download sertifikat kalibrasi terbaru Digital Caliper",
+  "Export risiko yang masih open ke Excel",
 ];
+
+/** Ringkasan aksi yang ikut dikirim di riwayat, supaya AI tahu apa yang sudah dilakukan. */
+function describeActions(actions: ChatAction[] = []) {
+  if (!actions.length) return "";
+  const parts = actions.map(a =>
+    a.kind === "navigate" ? `membuka ${a.label}` : a.kind === "download" ? `menawarkan download ${a.name}` : `export ${a.filename}.csv (${a.rows.length} baris)`
+  );
+  return `\n(Aksi: ${parts.join("; ")})`;
+}
 
 /** Render markdown sederhana (**bold** dan daftar "- ") tanpa innerHTML. */
 function renderInline(text: string) {
@@ -44,8 +70,36 @@ function MessageBody({ content }: { content: string }) {
   return <div className="space-y-2">{blocks}</div>;
 }
 
+function ActionCard({ action }: { action: ChatAction }) {
+  const base = "flex items-center gap-2 w-full text-left text-xs font-medium px-2.5 py-2 rounded-lg border transition-colors";
+  if (action.kind === "navigate") {
+    return (
+      <Link href={action.path} className={`${base} border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100`}>
+        <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate">Dibuka: {action.label}</span>
+      </Link>
+    );
+  }
+  if (action.kind === "download") {
+    return (
+      <a href={action.url} target="_blank" rel="noreferrer" className={`${base} border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100`}>
+        <Download className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate">{action.name}</span>
+      </a>
+    );
+  }
+  return (
+    <button type="button" onClick={() => downloadCSV(action.rows, action.filename)}
+      className={`${base} border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100`}>
+      <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+      <span className="truncate">{action.filename}.csv · {action.rows.length} baris</span>
+    </button>
+  );
+}
+
 export default function AiAssistant() {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -68,34 +122,65 @@ export default function AiAssistant() {
     setError(null);
     setInput("");
     const history: ChatMessage[] = [...messages, { role: "user", content }];
-    setMessages([...history, { role: "assistant", content: "" }]);
+    const reply: ChatMessage = { role: "assistant", content: "", actions: [] };
+    const render = () => setMessages([...history, { ...reply, actions: [...(reply.actions ?? [])] }]);
+    render();
     setLoading(true);
+
+    const handle = (e: ServerEvent) => {
+      switch (e.t) {
+        case "status": reply.status = e.text; break;
+        case "text": reply.content += (reply.content ? "\n" : "") + e.text; reply.status = undefined; break;
+        case "navigate":
+          reply.actions!.push({ kind: "navigate", path: e.path, label: e.label });
+          router.push(e.path);
+          break;
+        case "download": reply.actions!.push({ kind: "download", name: e.name, url: e.url }); break;
+        case "export":
+          reply.actions!.push({ kind: "export", filename: e.filename, rows: e.rows });
+          downloadCSV(e.rows, e.filename);
+          break;
+        case "error": reply.content += (reply.content ? "\n" : "") + e.message; reply.error = true; reply.status = undefined; break;
+        case "done": reply.status = undefined; break;
+      }
+      render();
+    };
 
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, page: pathname }),
+        body: JSON.stringify({
+          messages: history.map(m => ({ role: m.role, content: m.content + describeActions(m.actions) })),
+          page: pathname,
+        }),
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || "Gagal menghubungi AI.");
       }
 
+      // Respons berupa NDJSON: satu event JSON per baris.
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let answer = "";
+      let buffer = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        answer += decoder.decode(value, { stream: true });
-        setMessages([...history, { role: "assistant", content: answer }]);
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try { handle(JSON.parse(line)); } catch { /* baris rusak: abaikan */ }
+        }
       }
-      if (!answer.trim()) throw new Error("AI tidak memberikan jawaban. Coba lagi.");
+      if (!reply.content.trim() && !reply.actions?.length) throw new Error("AI tidak memberikan jawaban. Coba lagi.");
     } catch (err) {
       setMessages(history); // buang bubble kosong
       setError(err instanceof Error ? err.message : "Gagal menghubungi AI.");
     } finally {
+      reply.status = undefined;
       setLoading(false);
     }
   };
@@ -123,7 +208,7 @@ export default function AiAssistant() {
               <Sparkles className="w-5 h-5" />
               <div>
                 <p className="font-bold text-sm leading-tight">QMS Assistant</p>
-                <p className="text-[11px] text-violet-100 leading-tight">Answers from your ERP data · read-only</p>
+                <p className="text-[11px] text-violet-100 leading-tight">Cari data, buka halaman, download & export</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -148,7 +233,7 @@ export default function AiAssistant() {
             {messages.length === 0 && (
               <div className="space-y-3">
                 <p className="text-sm text-slate-600">
-                  Halo! Tanyakan apa saja tentang data QMS: NC, complaint, kalibrasi, risiko, training, audit, dan lainnya.
+                  Halo! Saya bisa mencari data QMS, membuka halaman atau record, menyiapkan file untuk di-download, dan export daftar ke Excel. Contoh:
                 </p>
                 <div className="flex flex-col gap-2">
                   {SUGGESTIONS.map(s => (
@@ -170,19 +255,32 @@ export default function AiAssistant() {
                   className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
                     m.role === "user"
                       ? "bg-violet-600 text-white rounded-br-md whitespace-pre-wrap"
-                      : "bg-white text-slate-800 border border-slate-200 rounded-bl-md"
+                      : `bg-white border rounded-bl-md space-y-2 ${m.error ? "text-red-700 border-red-200" : "text-slate-800 border-slate-200"}`
                   }`}
                 >
                   {m.role === "user" ? (
                     m.content
-                  ) : m.content ? (
-                    <MessageBody content={m.content} />
                   ) : (
-                    <span className="inline-flex gap-1 py-1" aria-label="AI is typing">
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]" />
-                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]" />
-                    </span>
+                    <>
+                      {m.actions && m.actions.length > 0 && (
+                        <div className="space-y-1.5">
+                          {m.actions.map((a, j) => <ActionCard key={j} action={a} />)}
+                        </div>
+                      )}
+                      {m.content && <MessageBody content={m.content} />}
+                      {m.status && (
+                        <p className="flex items-center gap-1.5 text-xs text-slate-500">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> {m.status}
+                        </p>
+                      )}
+                      {!m.content && !m.status && !m.actions?.length && (
+                        <span className="inline-flex gap-1 py-1" aria-label="AI is typing">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:150ms]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 animate-bounce [animation-delay:300ms]" />
+                        </span>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
