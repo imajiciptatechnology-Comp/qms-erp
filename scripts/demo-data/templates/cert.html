@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+  html,body{margin:0;background:#fff}
+  body{width:820px;height:1060px;font-family:Arial,sans-serif;color:#111}
+  .p{margin:30px;padding:30px 36px;border-top:10px solid #0f766e;position:relative}
+  .lab{font-weight:bold;font-size:19px;color:#0f766e}.lab small{display:block;font-weight:normal;font-size:11px;color:#555}
+  h1{text-align:center;font-size:21px;letter-spacing:2px;margin:24px 0 2px}
+  .no{text-align:center;font-weight:bold;margin:6px 0 18px}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px}
+  td,th{border:1px solid #9ca3af;padding:7px 10px;text-align:left}
+  th{background:#f0fdfa}
+  td.l{width:36%;font-weight:bold;background:#f9fafb}
+  .concl{border:2px solid #0f766e;padding:10px 14px;font-size:13px;border-radius:6px;background:#f0fdfa}
+  .wm{position:absolute;top:42%;left:6%;font-size:84px;font-weight:bold;color:rgba(220,38,38,.08);transform:rotate(-24deg)}
+</style></head>
+<body><div class="p">
+  <div class="wm">CONTOH / DEMO</div>
+  <div class="lab">PT Lab Kalibrasi Nusantara<small>Laboratorium kalibrasi — perusahaan fiktif untuk demo</small></div>
+  <h1>SERTIFIKAT KALIBRASI</h1>
+  <div class="no">No. Sertifikat: {{CERTNO}}</div>
+  <table>
+    <tr><td class="l">Nama Alat</td><td>{{NAME}}</td></tr>
+    <tr><td class="l">No. Seri / ID Alat</td><td>{{SERIAL}}</td></tr>
+    <tr><td class="l">Tanggal Kalibrasi</td><td>{{DATE}}</td></tr>
+    <tr><td class="l">Kalibrasi Ulang Disarankan</td><td>{{NEXT}}</td></tr>
+    <tr><td class="l">Standar Acuan</td><td>{{STANDARD}}</td></tr>
+  </table>
+  <table>{{ROWS}}</table>
+  <div class="concl"><b>Kesimpulan:</b> {{CONCLUSION}}</div>
+  <p style="font-size:12px;margin-top:30px">Jakarta, {{DATE}} — Manajer Teknis</p>
+</div></body></html>
