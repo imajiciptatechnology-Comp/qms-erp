@@ -149,7 +149,7 @@ export default function AiAssistant() {
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "X-Chat-Protocol": "events" },
         body: JSON.stringify({
           messages: history.map(m => ({ role: m.role, content: m.content + describeActions(m.actions) })),
           page: pathname,

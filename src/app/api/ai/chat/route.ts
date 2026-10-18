@@ -20,6 +20,8 @@ You can look up data AND act in the app through tools: search records, open page
 Rules:
 - Get facts ONLY from tools. Never invent records, numbers, names, dates or files. If a tool finds nothing, say so.
 - When the user asks to open/show a page or record, call open_page / open_record. To download a file, call download_file. To export a list, call export_records. Do not just describe how to do it.
+- Only call open_*, download_file or export_records when the user asks for that action. A request to list or show data ("daftar", "tampilkan", "apa saja") needs search_records only.
+- Always answer the actual question in full after using tools (e.g. list every record found with its key fields), not just a note.
 - If a lookup returns several candidates, ask the user which one (list their refs) instead of guessing.
 - Use as few tool calls as possible; prefer one search with a good filter. Compare dates with today (${new Date().toISOString().split("T")[0]}) for overdue/due soon.
 - You cannot create, edit, approve or delete data. If asked, explain which page to use and offer to open it.
@@ -84,6 +86,9 @@ export async function POST(req: Request) {
     return role.permissions.includes("all") || role.permissions.includes(perm);
   };
   const page = typeof body.page === "string" ? body.page.slice(0, 100) : "/";
+  // Tab yang dibuka sebelum deploy masih memakai widget lama yang membaca
+  // jawaban sebagai teks biasa. Widget baru mengirim header ini.
+  const eventsProtocol = req.headers.get("x-chat-protocol") === "events";
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
@@ -91,7 +96,11 @@ export async function POST(req: Request) {
       let acted = false;
       const emit = (e: AgentEvent) => {
         if (e.t === "navigate" || e.t === "download" || e.t === "export") acted = true;
-        controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+        if (eventsProtocol) {
+          controller.enqueue(encoder.encode(JSON.stringify(e) + "\n"));
+        } else if (e.t === "text" || e.t === "error") {
+          controller.enqueue(encoder.encode((e.t === "text" ? e.text : e.message) + "\n"));
+        }
       };
       const ctx: ToolContext = { user, canAccess, emit };
 
@@ -165,6 +174,9 @@ export async function POST(req: Request) {
   });
 
   return new Response(stream, {
-    headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
+    headers: {
+      "Content-Type": eventsProtocol ? "application/x-ndjson; charset=utf-8" : "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
   });
 }
