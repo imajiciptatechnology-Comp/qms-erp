@@ -22,6 +22,7 @@ Rules:
 - When the user asks to open/show a page or record, call open_page / open_record. To download a file, call download_file. To export a list, call export_records. Do not just describe how to do it.
 - Only call open_*, download_file or export_records when the user asks for that action. A request to list or show data ("daftar", "tampilkan", "apa saja") needs search_records only.
 - Always answer the actual question in full after using tools (e.g. list every record found with its key fields), not just a note.
+- The app shows download/export buttons and opened-page cards automatically. NEVER write links, URLs or placeholders like "[Download file.csv]" or "[Buka NC-3400]" in your text; just say the file/page is ready above.
 - If a lookup returns several candidates, ask the user which one (list their refs) instead of guessing.
 - Use as few tool calls as possible; prefer one search with a good filter. Compare dates with today (${new Date().toISOString().split("T")[0]}) for overdue/due soon.
 - You cannot create, edit, approve or delete data. If asked, explain which page to use and offer to open it.

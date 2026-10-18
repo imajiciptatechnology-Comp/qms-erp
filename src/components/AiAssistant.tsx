@@ -49,7 +49,20 @@ function renderInline(text: string) {
   });
 }
 
-function MessageBody({ content }: { content: string }) {
+/**
+ * Model kadang menulis tombol/link palsu ("[Download audit.csv]", "[NC-3400](/modules/…)").
+ * Tombol asli sudah tampil sebagai kartu aksi, jadi buang yang palsu.
+ */
+function stripFakeLinks(content: string) {
+  return content
+    .replace(/\[([^\]]+)\]\((?:[^)]*)\)/g, "$1") // [teks](url) → teks
+    .split("\n")
+    .filter(line => !/^\s*\[(?:download|unduh|buka|open|lihat)[^\]]*\]\s*$/i.test(line)) // baris "[Download …]"
+    .join("\n");
+}
+
+function MessageBody({ content: raw }: { content: string }) {
+  const content = stripFakeLinks(raw);
   const blocks: React.ReactNode[] = [];
   let list: string[] = [];
   const flush = () => {
