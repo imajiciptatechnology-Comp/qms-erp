@@ -39,11 +39,14 @@ function describeActions(actions: ChatAction[] = []) {
   return `\n(Aksi: ${parts.join("; ")})`;
 }
 
-/** Render markdown sederhana (**bold** dan daftar "- ") tanpa innerHTML. */
+/** Render markdown sederhana (**bold**, *italic*, `kode` dan daftar "- ") tanpa innerHTML. */
 function renderInline(text: string) {
-  return text.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-    part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <Fragment key={i}>{part}</Fragment>
-  );
+  return text.split(/(\*\*[^*]+\*\*|\*[^*\s][^*]*\*|`[^`]+`)/g).map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) return <strong key={i}>{part.slice(2, -2)}</strong>;
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) return <em key={i}>{part.slice(1, -1)}</em>;
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) return <code key={i} className="text-[0.85em] px-1 rounded bg-slate-100">{part.slice(1, -1)}</code>;
+    return <Fragment key={i}>{part}</Fragment>;
+  });
 }
 
 function MessageBody({ content }: { content: string }) {
