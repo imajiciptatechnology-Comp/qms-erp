@@ -4,6 +4,7 @@ import { getDashboardData } from "@/app/dashboard-data";
 import {
   AGENT_MODULES, AGENT_MODULE_IDS, AGENT_PAGES, searchModule, findRecord, exportModule, toSummary, type Filter,
 } from "./modules";
+import { buildModuleWorkbook } from "./export";
 
 /** Event yang dikirim ke browser selain teks jawaban. */
 export type AgentEvent =
@@ -11,7 +12,7 @@ export type AgentEvent =
   | { t: "text"; text: string }
   | { t: "navigate"; path: string; label: string }
   | { t: "download"; name: string; url: string }
-  | { t: "export"; filename: string; rows: Record<string, unknown>[] }
+  | { t: "export"; filename: string; count: number; base64: string }
   | { t: "error"; message: string }
   | { t: "done"; model?: string };
 
@@ -95,7 +96,7 @@ export const AGENT_TOOLS: AiTool[] = [
     type: "function",
     function: {
       name: "export_records",
-      description: "Export daftar record satu modul ke file CSV (bisa dibuka di Excel) dan tampilkan tombol download.",
+      description: "Export daftar record satu modul ke file Excel (.xlsx) yang sudah diformat, lalu tampilkan tombol download.",
       parameters: { type: "object", properties: { module: moduleEnum, filter: filterEnum, query: { type: "string" } }, required: ["module"] },
     },
   },
@@ -185,9 +186,9 @@ export async function runTool(name: string, args: Record<string, any>, ctx: Tool
     case "export_records": {
       const rows = await exportModule(moduleId!, { query: args.query, filter });
       if (!rows.length) return { exported: 0, note: "Tidak ada data yang cocok." };
-      const filename = `${moduleId}${filter !== "all" ? `_${filter}` : ""}`;
-      ctx.emit({ t: "export", filename, rows });
-      return { exported: rows.length, filename: `${filename}.csv` };
+      const { filename, base64 } = await buildModuleWorkbook(moduleId!, rows, { filter, query: args.query, user: ctx.user.name });
+      ctx.emit({ t: "export", filename, count: rows.length, base64 });
+      return { exported: rows.length, filename };
     }
 
     default:

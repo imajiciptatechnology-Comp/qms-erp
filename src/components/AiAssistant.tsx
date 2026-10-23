@@ -4,12 +4,11 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MessageSquareText, X, Send, RotateCcw, ArrowRight, Download, FileSpreadsheet, Loader2, ExternalLink } from "lucide-react";
-import { downloadCSV } from "@/lib/exportUtils";
 
 type ChatAction =
   | { kind: "navigate"; path: string; label: string }
   | { kind: "download"; name: string; url: string }
-  | { kind: "export"; filename: string; rows: Record<string, unknown>[] };
+  | { kind: "export"; filename: string; count: number; base64: string };
 
 type ChatMessage = { role: "user" | "assistant"; content: string; actions?: ChatAction[]; status?: string; error?: boolean };
 
@@ -19,7 +18,7 @@ type ServerEvent =
   | { t: "text"; text: string }
   | { t: "navigate"; path: string; label: string }
   | { t: "download"; name: string; url: string }
-  | { t: "export"; filename: string; rows: Record<string, unknown>[] }
+  | { t: "export"; filename: string; count: number; base64: string }
   | { t: "error"; message: string }
   | { t: "done"; model?: string };
 
@@ -30,11 +29,24 @@ const SUGGESTIONS = [
   "Export risiko yang masih open ke Excel",
 ];
 
+/** Unduh file Excel (.xlsx) dari isi base64 yang dikirim server. */
+function downloadXlsx(base64: string, filename: string) {
+  const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /** Ringkasan aksi yang ikut dikirim di riwayat, supaya AI tahu apa yang sudah dilakukan. */
 function describeActions(actions: ChatAction[] = []) {
   if (!actions.length) return "";
   const parts = actions.map(a =>
-    a.kind === "navigate" ? `membuka ${a.label}` : a.kind === "download" ? `menawarkan download ${a.name}` : `export ${a.filename}.csv (${a.rows.length} baris)`
+    a.kind === "navigate" ? `membuka ${a.label}` : a.kind === "download" ? `menawarkan download ${a.name}` : `export ${a.filename} (${a.count} baris)`
   );
   return `\n(Aksi: ${parts.join("; ")})`;
 }
@@ -110,9 +122,9 @@ function ActionCard({ action }: { action: ChatAction }) {
     );
   }
   return (
-    <button type="button" onClick={() => downloadCSV(action.rows, action.filename)} className={base}>
+    <button type="button" onClick={() => downloadXlsx(action.base64, action.filename)} className={base}>
       <FileSpreadsheet className="w-3.5 h-3.5 shrink-0 text-blue-600" aria-hidden="true" />
-      <span className="min-w-0 truncate"><span className="font-semibold">{action.filename}.csv</span> <span className="text-slate-500">· {action.rows.length} baris</span></span>
+      <span className="min-w-0 truncate"><span className="font-semibold">{action.filename}</span> <span className="text-slate-500">· {action.count} baris</span></span>
       <span className={verb}>Unduh lagi</span>
     </button>
   );
@@ -158,8 +170,8 @@ export default function AiAssistant() {
           break;
         case "download": reply.actions!.push({ kind: "download", name: e.name, url: e.url }); break;
         case "export":
-          reply.actions!.push({ kind: "export", filename: e.filename, rows: e.rows });
-          downloadCSV(e.rows, e.filename);
+          reply.actions!.push({ kind: "export", filename: e.filename, count: e.count, base64: e.base64 });
+          downloadXlsx(e.base64, e.filename);
           break;
         case "error": reply.content += (reply.content ? "\n" : "") + e.message; reply.error = true; reply.status = undefined; break;
         case "done": reply.status = undefined; break;
