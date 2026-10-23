@@ -66,10 +66,12 @@ function toCellValue(col: ColDef, v: CellValue): ExcelJS.CellValue {
 /** Lebar kolom dari isi terpanjang (dibatasi supaya tabel tetap rapi). */
 function fitWidth(col: ColDef, rows: Record<string, CellValue>[]) {
   if (col.width) return col.width;
-  if (col.type === "date") return 13;
-  const max = Math.max(col.header.length, ...rows.map(r => String(r[col.key] ?? "").length));
+  // Header butuh ruang ekstra untuk tombol filter (autofilter) di kanan sel.
+  const headerWidth = col.header.length + 6;
+  if (col.type === "date") return Math.max(14, headerWidth);
+  const content = Math.max(0, ...rows.map(r => String(r[col.key] ?? "").length)) + 3;
   const cap = col.type === "longtext" ? 60 : 36;
-  return Math.min(Math.max(max + 3, 10), cap);
+  return Math.min(Math.max(headerWidth, content, 10), cap);
 }
 
 function addSheet(wb: ExcelJS.Workbook, opts: SheetDef) {
