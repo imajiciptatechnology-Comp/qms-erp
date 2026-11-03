@@ -5,6 +5,14 @@ import { useState } from "react";
 import { changeUserRole, updateRolePermissions } from "../../actions/auth";
 import { MODULES } from "@/components/layout/Sidebar";
 
+const SPECIAL_PRIVILEGES = [
+  { id: "document_approve", label: "Can Approve Documents" },
+  { id: "audit_manage", label: "Can Manage Audits" },
+  { id: "sales_manage", label: "Can Create Quotations & Sales Orders" },
+  { id: "sales_approve", label: "Can Approve Sales Discounts & Orders" },
+  { id: "finance", label: "Can Manage Invoices & Payments" },
+];
+
 export default function RolesClient({ users, currentUser, initialRolesConfig }: { users: any[], currentUser: any, initialRolesConfig: any[] }) {
   const [activeTab, setActiveTab] = useState<"users" | "permissions">("users");
   const [loadingId, setLoadingId] = useState<string | null>(null);
@@ -161,32 +169,24 @@ export default function RolesClient({ users, currentUser, initialRolesConfig }: 
                   {/* Additional Privileges */}
                   <div className="col-span-2 mb-2 pb-2 border-b border-slate-100">
                     <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Special Privileges</div>
-                    <label className={`flex items-center gap-3 p-2 rounded-lg border ${role.name === 'Super Admin' || role.permissions.includes('document_approve') ? 'border-amber-200 bg-amber-50/50' : 'border-slate-100 hover:bg-slate-50'} ${role.name === 'Super Admin' ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
-                      <input 
-                        type="checkbox" 
-                        checked={role.name === 'Super Admin' || role.permissions.includes('document_approve')}
-                        onChange={() => handleTogglePermission(role.name, 'document_approve')}
-                        disabled={role.name === 'Super Admin'}
-                        className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500"
-                      />
-                      <span className="text-sm font-medium text-amber-800 flex items-center gap-2">
-                        <Key className="w-4 h-4 text-amber-500" />
-                        Can Approve Documents
-                      </span>
-                    </label>
-                    <label className={`flex items-center gap-3 p-2 rounded-lg border ${role.name === 'Super Admin' || role.permissions.includes('audit_manage') ? 'border-amber-200 bg-amber-50/50' : 'border-slate-100 hover:bg-slate-50'} ${role.name === 'Super Admin' ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'} mt-2`}>
-                      <input 
-                        type="checkbox" 
-                        checked={role.name === 'Super Admin' || role.permissions.includes('audit_manage')}
-                        onChange={() => handleTogglePermission(role.name, 'audit_manage')}
-                        disabled={role.name === 'Super Admin'}
-                        className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500"
-                      />
-                      <span className="text-sm font-medium text-amber-800 flex items-center gap-2">
-                        <Key className="w-4 h-4 text-amber-500" />
-                        Can Manage Audits
-                      </span>
-                    </label>
+                    {SPECIAL_PRIVILEGES.map((priv, i) => {
+                      const checked = role.name === "Super Admin" || role.permissions.includes(priv.id);
+                      return (
+                        <label key={priv.id} className={`flex items-center gap-3 p-2 rounded-lg border ${checked ? "border-amber-200 bg-amber-50/50" : "border-slate-100 hover:bg-slate-50"} ${role.name === "Super Admin" ? "opacity-70 cursor-not-allowed" : "cursor-pointer"} ${i > 0 ? "mt-2" : ""}`}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleTogglePermission(role.name, priv.id)}
+                            disabled={role.name === "Super Admin"}
+                            className="w-4 h-4 text-amber-600 rounded border-slate-300 focus:ring-amber-500"
+                          />
+                          <span className="text-sm font-medium text-amber-800 flex items-center gap-2">
+                            <Key className="w-4 h-4 text-amber-500" />
+                            {priv.label}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
 
                   <div className="col-span-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-2 mb-1">Module Access</div>

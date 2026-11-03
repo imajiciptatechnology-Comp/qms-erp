@@ -533,3 +533,226 @@ model KvStore {
   value     String
   updatedAt DateTime @updatedAt
 }
+
+// ---------------------------------------------------------
+// SALES & MARKETING (B2B: penawaran → PO customer → invoice → kontrak)
+// Nominal dalam Rupiah. Status "jatuh tempo"/"hampir habis" dihitung dari tanggal, tidak disimpan.
+// ---------------------------------------------------------
+
+model Customer {
+  id            String        @id @default(cuid())
+  customerNo    String        @unique
+  name          String
+  type          String // Universitas | Rumah Sakit | Farmasi | Lab Pangan | Pemerintah | Industri
+  npwp          String?
+  address       String?
+  city          String?
+  contactName   String?
+  contactTitle  String?
+  contactEmail  String?
+  contactPhone  String?
+  paymentTerms  String        @default("30 hari")
+  status        String        @default("Active")
+  notes         String?
+  createdAt     String
+  historyJson   String        @default("[]")
+  opportunities Opportunity[]
+  quotations    Quotation[]
+  salesOrders   SalesOrder[]
+  invoices      Invoice[]
+  contracts     Contract[]
+}
+
+model Product {
+  id                        String  @id @default(cuid())
+  sku                       String  @unique
+  name                      String
+  category                  String
+  brand                     String
+  model                     String?
+  unit                      String  @default("Unit")
+  price                     Float
+  availability              String  @default("Ready") // Ready | Indent
+  leadTimeWeeks             Int?
+  warrantyMonths            Int     @default(12)
+  requiresCalibration       Boolean @default(false)
+  calibrationIntervalMonths Int?
+  description               String?
+  specs                     String?
+  isActive                  Boolean @default(true)
+  createdAt                 String
+}
+
+model Opportunity {
+  id                String      @id @default(cuid())
+  opportunityNo     String      @unique
+  title             String
+  customerId        String
+  stage             String // Lead | Qualified | Quotation | Negotiation | Won | Lost
+  source            String // Tender | Referensi | Website | Pameran | Repeat Order
+  estimatedValue    Float       @default(0)
+  probability       Int         @default(10)
+  expectedCloseDate String?
+  salesName         String
+  lostReason        String?
+  notes             String?
+  createdAt         String
+  historyJson       String      @default("[]")
+  customer          Customer    @relation(fields: [customerId], references: [id])
+  quotations        Quotation[]
+}
+
+model Quotation {
+  id              String          @id @default(cuid())
+  quotationNo     String
+  revision        Int             @default(0)
+  customerId      String
+  opportunityId   String?
+  date            String
+  validUntil      String
+  status          String // Draft | Waiting Approval | Approved | Sent | Accepted | Rejected | Superseded
+  subject         String
+  attention       String?
+  introText       String?
+  closingText     String?
+  subtotal        Float           @default(0)
+  discountPercent Float           @default(0)
+  discountAmount  Float           @default(0)
+  taxPercent      Float           @default(11)
+  taxAmount       Float           @default(0)
+  total           Float           @default(0)
+  paymentTerms    String?
+  deliveryTerms   String?
+  warrantyTerms   String?
+  notes           String?
+  salesName       String
+  approvedBy      String?
+  approvedAt      String?
+  createdBy       String
+  createdAt       String
+  historyJson     String          @default("[]")
+  customer        Customer        @relation(fields: [customerId], references: [id])
+  opportunity     Opportunity?    @relation(fields: [opportunityId], references: [id])
+  items           QuotationItem[]
+  salesOrders     SalesOrder[]
+
+  @@unique([quotationNo, revision])
+}
+
+model QuotationItem {
+  id              String    @id @default(cuid())
+  quotationId     String
+  productId       String?
+  description     String
+  specs           String?
+  qty             Float
+  unit            String
+  unitPrice       Float
+  discountPercent Float     @default(0)
+  lineTotal       Float
+  sortOrder       Int       @default(0)
+  quotation       Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+}
+
+model SalesOrder {
+  id                  String           @id @default(cuid())
+  soNo                String           @unique
+  customerId          String
+  quotationId         String?
+  customerPoNo        String
+  customerPoDate      String
+  customerPoFile      String?
+  orderDate           String
+  status              String // Contract Review | Confirmed | In Delivery | Installed | Completed | Cancelled
+  contractReviewJson  String           @default("[]")
+  deliveryAddress     String?
+  expectedDelivery    String?
+  shipmentId          String?
+  installationDate    String?
+  bastNo              String?
+  bastDate            String?
+  subtotal            Float            @default(0)
+  taxAmount           Float            @default(0)
+  total               Float            @default(0)
+  paymentScheduleJson String           @default("[]")
+  salesName           String
+  notes               String?
+  createdAt           String
+  historyJson         String           @default("[]")
+  customer            Customer         @relation(fields: [customerId], references: [id])
+  quotation           Quotation?       @relation(fields: [quotationId], references: [id])
+  items               SalesOrderItem[]
+  invoices            Invoice[]
+  contracts           Contract[]
+}
+
+model SalesOrderItem {
+  id            String     @id @default(cuid())
+  salesOrderId  String
+  productId     String?
+  description   String
+  qty           Float
+  unit          String
+  unitPrice     Float
+  lineTotal     Float
+  serialNumbers String?
+  sortOrder     Int        @default(0)
+  salesOrder    SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id            String      @id @default(cuid())
+  invoiceNo     String      @unique
+  customerId    String
+  salesOrderId  String?
+  termLabel     String
+  termPercent   Float?
+  invoiceDate   String
+  dueDate       String
+  subtotal      Float
+  taxAmount     Float
+  total         Float
+  paidAmount    Float       @default(0)
+  status        String // Unpaid | Partial | Paid | Cancelled
+  fakturPajakNo String?
+  notes         String?
+  createdAt     String
+  historyJson   String      @default("[]")
+  customer      Customer    @relation(fields: [customerId], references: [id])
+  salesOrder    SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  payments      Payment[]
+}
+
+model Payment {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  paymentDate String
+  amount      Float
+  method      String // Transfer | Giro | Tunai
+  reference   String?
+  proofUrl    String?
+  receivedBy  String
+  createdAt   String
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model Contract {
+  id               String      @id @default(cuid())
+  contractNo       String      @unique
+  customerId       String
+  salesOrderId     String?
+  type             String // Garansi | Service | Kalibrasi | AMC
+  title            String
+  startDate        String
+  endDate          String
+  value            Float       @default(0)
+  visitsPerYear    Int?
+  coveredItemsJson String      @default("[]")
+  status           String // Active | Expired | Terminated | Renewed
+  picName          String?
+  notes            String?
+  createdAt        String
+  historyJson      String      @default("[]")
+  customer         Customer    @relation(fields: [customerId], references: [id])
+  salesOrder       SalesOrder? @relation(fields: [salesOrderId], references: [id])
+}

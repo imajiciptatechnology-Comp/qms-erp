@@ -122,14 +122,14 @@ async function requestWithFallback(
 /** Panggil model dan kembalikan teks jawabannya. */
 export async function aiComplete(
   messages: AiMessage[],
-  opts: { json?: boolean; maxTokens?: number; temperature?: number } = {}
+  opts: { json?: boolean; maxTokens?: number; temperature?: number; deadline?: number } = {}
 ): Promise<{ text: string; model: string }> {
   const { message, model } = await requestWithFallback({
     messages,
     temperature: opts.temperature ?? 0.2,
     max_tokens: opts.maxTokens ?? 2048,
     ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-  });
+  }, opts.deadline ? { deadline: opts.deadline } : undefined);
   const text = typeof message.content === "string" ? message.content : "";
   if (!text) throw new AiError("AI tidak mengembalikan jawaban.");
   return { text, model };

@@ -5,6 +5,10 @@ import {
   AGENT_MODULES, AGENT_MODULE_IDS, AGENT_PAGES, searchModule, findRecord, exportModule, toSummary, type Filter,
 } from "./modules";
 import { buildModuleWorkbook } from "./export";
+import { prisma } from "@/lib/prisma";
+import { generateQuotationDraft } from "@/app/modules/sales/ai/draftQuotation";
+import { insertDraftQuotation } from "@/app/modules/sales/server";
+import { needsApproval } from "@/app/modules/sales/lib";
 
 /** Event yang dikirim ke browser selain teks jawaban. */
 export type AgentEvent =
@@ -100,6 +104,21 @@ export const AGENT_TOOLS: AiTool[] = [
       parameters: { type: "object", properties: { module: moduleEnum, filter: filterEnum, query: { type: "string" } }, required: ["module"] },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "draft_quotation",
+      description: "Buat DRAFT surat penawaran harga (Sales) untuk satu customer berdasarkan kebutuhan yang disebut user, meniru penawaran-penawaran sebelumnya. Produk dipilih dari katalog dan harga dari master produk. Draft langsung dibuka di layar user untuk direview.",
+      parameters: {
+        type: "object",
+        properties: {
+          customer: { type: "string", description: "Nama atau nomor customer (mis. 'RSUP Harapan Sehat' atau 'CUS-0002')" },
+          request: { type: "string", description: "Kebutuhan lengkap dari user: alat, jumlah, diskon, catatan khusus" },
+        },
+        required: ["customer", "request"],
+      },
+    },
+  },
 ];
 
 /** Label status singkat yang ditampilkan di chat saat tool berjalan. */
@@ -113,6 +132,7 @@ export function toolStatus(name: string, args: Record<string, any>): string {
     case "open_record": return `Membuka ${args.ref ?? "record"}…`;
     case "download_file": return `Menyiapkan file ${args.ref ?? ""}…`;
     case "export_records": return `Menyiapkan export ${label}…`;
+    case "draft_quotation": return `Menyusun draft penawaran untuk ${args.customer ?? "customer"}…`;
     default: return "Memproses…";
   }
 }
@@ -189,6 +209,29 @@ export async function runTool(name: string, args: Record<string, any>, ctx: Tool
       const { filename, base64 } = await buildModuleWorkbook(moduleId!, rows, { filter, query: args.query, user: ctx.user.name });
       ctx.emit({ t: "export", filename, count: rows.length, base64 });
       return { exported: rows.length, filename };
+    }
+
+    case "draft_quotation": {
+      if (!ctx.canAccess("sales_manage")) return { error: "User tidak punya hak membuat penawaran (butuh izin sales_manage)." };
+      const q = String(args.customer ?? "").trim();
+      if (!q) return { error: "Sebutkan customer-nya." };
+      const matches = await prisma.customer.findMany({
+        where: { OR: [{ customerNo: { equals: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] },
+        select: { id: true, customerNo: true, name: true }, take: 5,
+      });
+      if (matches.length === 0) return { found: false, note: `Customer "${q}" tidak ditemukan. Minta user menyebut nama yang lain atau tambahkan customer dulu.` };
+      if (matches.length > 1) return { found: false, candidates: matches.map(c => `${c.customerNo} ${c.name}`) };
+
+      const result = await generateQuotationDraft({ customerId: matches[0].id, request: String(args.request ?? ""), deadline: Date.now() + 35_000 });
+      const created = await insertDraftQuotation(ctx.user.name, result.draft, `Draft dibuat oleh AI Assistant (referensi: ${result.references.join(", ") || "-"})`);
+      ctx.emit({ t: "navigate", path: `/modules/sales/quotations/${created.id}`, label: created.quotationNo });
+      return {
+        created: created.quotationNo, status: "Draft", customer: matches[0].name, total: created.total,
+        items: result.draft.items.map(i => `${i.qty} ${i.unit} ${i.description}`), discountPercent: result.draft.discountPercent,
+        needsManagerApproval: needsApproval(result.draft.discountPercent, result.draft.items),
+        explanation: result.explanation, notInCatalog: result.unmatched,
+        note: "Draft sudah dibuka. Minta user mengecek isi lalu klik Ajukan. Jangan sebut harga satuan selain total.",
+      };
     }
 
     default:

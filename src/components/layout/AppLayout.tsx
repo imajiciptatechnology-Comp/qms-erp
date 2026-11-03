@@ -50,7 +50,7 @@ export default function AppLayout({ children, user, rolesConfig }: { children: R
       <Sidebar user={user} rolesConfig={rolesConfig} isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* Main content — full width on mobile, offset by sidebar on lg+ */}
-      <div className="flex-1 lg:ml-64 flex flex-col min-h-screen">
+      <div className="flex-1 min-w-0 lg:ml-64 flex flex-col min-h-screen">
         <Topbar user={user} onMenuToggle={() => setSidebarOpen(v => !v)} />
 
         <main id="main-content" className="flex-1 p-4 sm:p-6">

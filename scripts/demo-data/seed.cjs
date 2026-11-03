@@ -11,6 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const { prisma, supabase, BUCKET, STORAGE_DIR } = require("./common.cjs");
 const { clearDemo } = require("./clear.cjs");
+const { seedSales } = require("./seed-sales.cjs");
 
 const day = n => {
   const d = new Date();
@@ -169,6 +170,9 @@ async function main() {
     { stampNumber: "DEMO-W-001", name: "Joko Santoso", processType: "GTAW", position: "6G", expiryDate: day(200), status: "Active" },
     { stampNumber: "DEMO-W-002", name: "Bayu Saputra", processType: "GTAW", position: "3G", expiryDate: day(25), status: "Active", notes: "Sertifikat akan habis, jadwalkan uji ulang." },
   ] });
+
+  // ---------- Sales & Marketing ----------
+  await seedSales();
 
   console.log("Data demo berhasil dibuat (awalan DEMO-, file di storage folder demo/).");
 }

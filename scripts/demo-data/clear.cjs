@@ -4,8 +4,10 @@
  * Jalankan: node scripts/demo-data/clear.cjs
  */
 const { prisma, supabase, BUCKET, PREFIX, STORAGE_DIR } = require("./common.cjs");
+const { clearSales } = require("./seed-sales.cjs");
 
 async function clearDemo({ quiet = false } = {}) {
+  await clearSales({ quiet });
   const starts = { startsWith: PREFIX };
   // Urutan: tabel anak dulu (relasi cascade tetap aman).
   const results = {

@@ -24,6 +24,7 @@ import {
   Target,
   ClipboardList,
   Globe,
+  Briefcase,
   X
 } from "lucide-react";
 
@@ -48,6 +49,7 @@ export const MODULES = [
   { id: "welding", name: "Welding Management", path: "/modules/welding", icon: Flame },
   { id: "hse", name: "HSE", path: "/modules/hse", icon: HardHat },
   { id: "moc", name: "Management of Change", path: "/modules/moc", icon: RefreshCw },
+  { id: "sales", name: "Sales & Marketing", path: "/modules/sales", icon: Briefcase },
 ];
 
 export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClose }: {
@@ -98,7 +100,7 @@ export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClos
           Modules
         </div>
         {MODULES.map((mod) => {
-          const isActive = pathname === mod.path;
+          const isActive = pathname === mod.path || (mod.path !== "/" && pathname.startsWith(mod.path + "/"));
           const accessible = hasAccess(mod.id);
 
           if (!accessible) {
