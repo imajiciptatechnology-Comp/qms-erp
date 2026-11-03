@@ -123,14 +123,30 @@ async function requestWithFallback(
 /** Panggil model dan kembalikan teks jawabannya. */
 export async function aiComplete(
   messages: AiMessage[],
-  opts: { json?: boolean; maxTokens?: number; temperature?: number; deadline?: number } = {}
+  opts: {
+    json?: boolean; maxTokens?: number; temperature?: number; deadline?: number;
+    /** Batas waktu per model sebelum pindah ke model cadangan (default 25 dtk). */
+    attemptMs?: number;
+    /** Kurangi "thinking" model reasoning (Gemini/OpenAI) supaya lebih cepat. */
+    reasoningEffort?: "low" | "medium" | "high";
+  } = {}
 ): Promise<{ text: string; model: string }> {
-  const { message, model } = await requestWithFallback({
+  const body = {
     messages,
     temperature: opts.temperature ?? 0.2,
     max_tokens: opts.maxTokens ?? 2048,
     ...(opts.json ? { response_format: { type: "json_object" } } : {}),
-  }, opts.deadline ? { deadline: opts.deadline } : undefined);
+  };
+  const reqOpts: RequestOpts = { ...(opts.deadline ? { deadline: opts.deadline } : {}), ...(opts.attemptMs ? { attemptMs: opts.attemptMs } : {}) };
+  let result: { message: Record<string, unknown>; model: string };
+  try {
+    result = await requestWithFallback(opts.reasoningEffort ? { ...body, reasoning_effort: opts.reasoningEffort } : body, reqOpts);
+  } catch (err) {
+    // Provider yang tidak mengenal reasoning_effort menolak dengan 400: ulangi tanpa parameter itu.
+    if (!(opts.reasoningEffort && err instanceof AiError && err.status === 400)) throw err;
+    result = await requestWithFallback(body, reqOpts);
+  }
+  const { message, model } = result;
   const text = typeof message.content === "string" ? message.content : "";
   if (!text) throw new AiError("AI tidak mengembalikan jawaban.");
   return { text, model };

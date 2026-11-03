@@ -44,7 +44,7 @@ async function pickExamples(customerId: string, customerType: string) {
     where: { customerId: { not: customerId }, customer: { type: customerType }, ...notDraft }, include, orderBy: { date: "desc" }, take: 2,
   });
   const accepted = await prisma.quotation.findMany({ where: { status: "Accepted", id: { notIn: [...same, ...similar].map(q => q.id) } }, include, orderBy: { date: "desc" }, take: 2 });
-  return [...same, ...similar, ...accepted].slice(0, 4);
+  return [...same, ...similar, ...accepted].slice(0, 3);
 }
 
 export async function generateQuotationDraft(input: { customerId: string; request: string; opportunityId?: string | null; deadline?: number }): Promise<AiDraftResult> {
@@ -59,14 +59,14 @@ export async function generateQuotationDraft(input: { customerId: string; reques
     input.opportunityId ? prisma.opportunity.findUnique({ where: { id: input.opportunityId } }) : null,
   ]);
 
-  const catalog = products.map(p => ({
-    sku: p.sku, name: p.name, brand: p.model ? `${p.brand} ${p.model}` : p.brand, category: p.category, unit: p.unit,
-    price: p.price, availability: p.availability === "Indent" ? `indent ${p.leadTimeWeeks ?? "?"} minggu` : "ready", warrantyMonths: p.warrantyMonths,
-  }));
-  const exampleDocs = examples.map(q => ({
+  // Prompt sengaja ringkas: prompt besar membuat model lambat (timeout di Vercel) dan jawaban terpotong.
+  const catalog = products.map(p => `${p.sku} | ${p.name} (${p.model ? `${p.brand} ${p.model}` : p.brand}) | ${p.unit} | Rp${p.price} | ${p.availability === "Indent" ? `indent ${p.leadTimeWeeks ?? "?"} mgg` : "ready"}`);
+  const exampleDocs = examples.map((q, i) => ({
     no: `${q.quotationNo} Rev.${q.revision}`, customer: `${q.customer.name} (${q.customer.type})`, status: q.status, subject: q.subject,
-    items: q.items.map(i => ({ description: i.description, qty: i.qty, discountPercent: i.discountPercent })), discountPercent: q.discountPercent,
-    introText: q.introText, closingText: q.closingText, paymentTerms: q.paymentTerms, deliveryTerms: q.deliveryTerms, warrantyTerms: q.warrantyTerms,
+    items: q.items.map(it => `${it.qty}× ${it.description}${it.discountPercent ? ` (diskon ${it.discountPercent}%)` : ""}`), discountPercent: q.discountPercent,
+    paymentTerms: q.paymentTerms, deliveryTerms: q.deliveryTerms, warrantyTerms: q.warrantyTerms,
+    // Teks surat lengkap cukup dari satu contoh sebagai acuan gaya bahasa.
+    ...(i === 0 ? { introText: q.introText, closingText: q.closingText } : {}),
   }));
 
   const system = `Kamu adalah asisten sales PT Labtech Penta International (distributor alat laboratorium, B2B, Indonesia).
@@ -77,7 +77,7 @@ Aturan:
 - Jika kebutuhan mencakup alat yang perlu dipasang (bukan jasa atau alat portable kecil), tambahkan jasa "Instalasi, Commissioning & Training" (sku LPI-SRV-003) bila ada di katalog dan belum diminta, sejumlah unit alat tersebut — kecuali user bilang tidak perlu.
 - Kebutuhan yang tidak ada di katalog tulis di "unmatched", jangan dipaksakan.
 - Diskon hanya jika diminta user atau lazim di contoh untuk customer yang sama; maksimal ${MAX_DISCOUNT}%. Diskon di atas 10% nanti butuh persetujuan Sales Manager.
-- introText: pembuka surat seperti contoh (diawali "Dengan hormat,"), sebutkan alat yang ditawarkan. closingText: penutup seperti contoh. Pisahkan paragraf dengan baris kosong.
+- introText: pembuka surat seperti contoh (diawali "Dengan hormat,"), sebutkan alat yang ditawarkan. closingText: penutup seperti contoh. Masing-masing maksimal ±80 kata. Pisahkan paragraf dengan baris kosong.
 - Syarat pembayaran sesuaikan termin customer (${customer.paymentTerms}); untuk instansi pemerintah ikuti pola contoh pemerintah. Pengiriman: sebut indent bila ada item indent.
 - explanation: 1-3 kalimat untuk sales (bukan untuk customer): contoh mana yang dijadikan acuan, asumsi yang kamu ambil, dan hal yang perlu dicek.
 
@@ -89,11 +89,20 @@ Jawab HANYA JSON dengan bentuk:
     customer: { name: customer.name, type: customer.type, city: customer.city, contact: customer.contactName, paymentTerms: customer.paymentTerms },
     opportunity: opportunity ? { title: opportunity.title, notes: opportunity.notes } : undefined,
     contohPenawaranSebelumnya: exampleDocs,
-    katalog: catalog,
+    katalog: { format: "sku | nama (merek model) | satuan | harga | ketersediaan", items: catalog },
   });
 
-  const { text, model } = await aiComplete([{ role: "system", content: system }, { role: "user", content: user }], { json: true, maxTokens: 2500, temperature: 0.3, deadline: input.deadline });
-  const ans = parseAiJson<AiAnswer>(text);
+  const { text, model } = await aiComplete([{ role: "system", content: system }, { role: "user", content: user }], {
+    json: true, maxTokens: 8192, temperature: 0.3, reasoningEffort: "low",
+    deadline: input.deadline ?? Date.now() + 55_000, attemptMs: 40_000,
+  });
+  let ans: AiAnswer;
+  try {
+    ans = parseAiJson<AiAnswer>(text);
+  } catch (err) {
+    console.warn(`[ai-draft] ${model}: JSON tidak valid (${text.length} karakter), akhir: ${JSON.stringify(text.slice(-200))}`);
+    throw err;
+  }
 
   // Validasi keras: hanya SKU katalog, harga dari database, angka dibatasi.
   const bySku = new Map(products.map(p => [p.sku.toUpperCase(), p]));
