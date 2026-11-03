@@ -95,7 +95,8 @@ Jawab HANYA JSON: {"itemIndexes": number[], "title": string, "startDate": "YYYY-
   const value = Math.round(type === "AMC" ? priceOf("SRV-002") * items.length * years
     : type === "Kalibrasi" ? priceOf("SRV-001") * items.length * (visitsPerYear ?? 1) * years : 0);
   const billingSchedule = ans.billingSchedule === "Quarterly" ? "Quarterly" : "Upfront";
-  const sparePartDiscount = type === "AMC" ? clamp(ans.sparePartDiscount, 0, 30, 15) : null;
+  // Diskon suku cadang AMC default 15% kecuali user menyebut angka lain (AI sering mengisi 0 bila tidak disebut).
+  const sparePartDiscount = type === "AMC" ? (Number(ans.sparePartDiscount) > 0 ? clamp(ans.sparePartDiscount, 0, 30, 15) : 15) : null;
   const responseTime = str(ans.responseTime) || "2x24 jam hari kerja";
   const scope = str(ans.scope);
   const paymentTerms = str(ans.paymentTerms);

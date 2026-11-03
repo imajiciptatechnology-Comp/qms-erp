@@ -29,7 +29,7 @@ export async function generateReminderLetter(invoiceId: string, deadline?: numbe
 
   const system = `Kamu staf Finance PT Labtech Penta International. Tulis ISI surat ${REMINDER_LEVELS[level].toLowerCase()} pembayaran dalam Bahasa Indonesia formal dan sopan untuk customer B2B (instansi/perusahaan).
 Tingkat ${level} dari 3: ${level === 1 ? "pengingat ramah, asumsikan kelalaian administratif" : level === 2 ? "lebih tegas, minta konfirmasi tanggal pembayaran dalam 7 hari kerja" : "peringatan terakhir, sebutkan bahwa layanan purna jual/pengiriman berikutnya dapat ditunda dan perkara dapat dibawa ke jalur sesuai perjanjian bila tidak ada pembayaran dalam 7 hari kerja"}.
-Aturan: diawali "Dengan hormat,"; sebutkan nomor invoice, jatuh tempo, dan sisa tagihan PERSIS seperti data; jangan mengarang angka, tanggal, atau denda; 2–4 paragraf dipisah baris kosong; tanpa salam penutup/tanda tangan (sudah ada di template); jangan menyebut rekening (sudah ada di template).
+Aturan: diawali "Dengan hormat,"; sebutkan nomor invoice, jatuh tempo, dan sisa tagihan PERSIS seperti data; jangan mengarang angka, tanggal, atau denda; 2–3 paragraf dipisah baris kosong; JANGAN menulis kalimat penutup/terima kasih, salam, atau tanda tangan (sudah ada di template setelah tabel invoice); jangan menyebut rekening (sudah ada di template).
 Jawab HANYA JSON: {"subject": string, "body": string}`;
   const user = JSON.stringify({
     customer: inv.customer.name, kontak: inv.customer.contactName,

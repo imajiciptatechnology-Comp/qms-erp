@@ -274,7 +274,8 @@ async function reminder(id: string): Promise<DocModel | null> {
       { type: "table", columns: [{ label: "No. Invoice", width: 26 }, { label: "Tanggal", width: 16 }, { label: "Jatuh Tempo", width: 16 }, { label: "Total", width: 21, align: "right" }, { label: "Sisa Tagihan", width: 21, align: "right" }],
         rows: [[{ text: inv.invoiceNo, bold: true, sub: inv.salesOrder ? `PO ${inv.salesOrder.customerPoNo}` : inv.termLabel }, tanggal(inv.invoiceDate), tanggal(inv.dueDate), rupiah(inv.total), { text: rupiah(inv.total - inv.paidAmount), bold: true }]] },
       { type: "kv", rows: [["Rekening", L.bank], ["Konfirmasi", `${L.phone} · ${L.email}`]] },
-      { type: "note", text: "Abaikan surat ini apabila pembayaran telah dilakukan, dan mohon kirimkan bukti transfer kepada kami. Terima kasih." },
+      { type: "para", text: "Atas perhatian dan kerja sama Bapak/Ibu, kami ucapkan terima kasih." },
+      { type: "note", text: "Abaikan surat ini apabila pembayaran telah dilakukan, dan mohon kirimkan bukti transfer kepada kami." },
     ],
     signatures: [{ lead: "Hormat kami,", org: L.company, name: S.finance.name, title: S.finance.title }],
   };
