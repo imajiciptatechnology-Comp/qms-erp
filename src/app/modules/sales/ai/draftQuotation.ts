@@ -94,7 +94,7 @@ Jawab HANYA JSON dengan bentuk:
 
   const { text, model } = await aiComplete([{ role: "system", content: system }, { role: "user", content: user }], {
     json: true, maxTokens: 8192, temperature: 0.3, reasoningEffort: "low",
-    deadline: input.deadline ?? Date.now() + 55_000, attemptMs: 40_000,
+    deadline: input.deadline ?? Date.now() + 55_000, attemptMs: 25_000,
   });
   let ans: AiAnswer;
   try {

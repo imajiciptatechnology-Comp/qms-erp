@@ -29,6 +29,8 @@ type ModuleDef = {
   files?: (row: any) => AgentFile[];
   /** Dokumen terbatas tidak boleh di-download lewat AI. */
   isRestricted?: (row: any) => boolean;
+  /** Tabel punya relasi customer: nama customer ikut dicari & ditampilkan (kolom "customer"). */
+  hasCustomer?: boolean;
 };
 
 const fileNameFromUrl = (url: string) => decodeURIComponent(url.split("?")[0].split("/").pop() || "file");
@@ -232,11 +234,12 @@ export const AGENT_MODULES: Record<string, ModuleDef> = {
     table: () => prisma.quotation,
     refField: "quotationNo",
     searchFields: ["quotationNo", "subject", "salesName", "status"],
-    select: { id: true, quotationNo: true, revision: true, date: true, validUntil: true, status: true, subject: true, total: true, salesName: true },
+    hasCustomer: true,
+    select: { customer: { select: { name: true } }, id: true, quotationNo: true, revision: true, date: true, validUntil: true, status: true, subject: true, total: true, salesName: true },
     orderBy: { date: "desc" },
     closedStatuses: ["Accepted", "Rejected", "Superseded"],
     dueField: "validUntil",
-    columns: ["quotationNo", "revision", "date", "validUntil", "status", "subject", "total", "salesName"],
+    columns: ["quotationNo", "revision", "customer", "date", "validUntil", "status", "subject", "total", "salesName"],
   },
   "sales-order": {
     label: "Sales Order (PO customer)",
@@ -246,25 +249,27 @@ export const AGENT_MODULES: Record<string, ModuleDef> = {
     table: () => prisma.salesOrder,
     refField: "soNo",
     searchFields: ["soNo", "customerPoNo", "salesName", "status"],
-    select: { id: true, soNo: true, customerPoNo: true, orderDate: true, expectedDelivery: true, status: true, total: true, salesName: true },
+    hasCustomer: true,
+    select: { customer: { select: { name: true } }, id: true, soNo: true, customerPoNo: true, orderDate: true, expectedDelivery: true, status: true, total: true, salesName: true },
     orderBy: { orderDate: "desc" },
     closedStatuses: ["Completed", "Cancelled"],
     dueField: "expectedDelivery",
-    columns: ["soNo", "customerPoNo", "orderDate", "expectedDelivery", "status", "total", "salesName"],
+    columns: ["soNo", "customer", "customerPoNo", "orderDate", "expectedDelivery", "status", "total", "salesName"],
   },
   invoice: {
-    label: "Invoice & piutang",
+    label: "Invoice & piutang (sisa tagihan = total - paidAmount)",
     perm: "sales",
     listPath: "/modules/sales/invoices",
     detailPath: id => `/modules/sales/invoices/${id}`,
     table: () => prisma.invoice,
     refField: "invoiceNo",
     searchFields: ["invoiceNo", "termLabel", "status"],
-    select: { id: true, invoiceNo: true, termLabel: true, invoiceDate: true, dueDate: true, total: true, paidAmount: true, status: true },
+    hasCustomer: true,
+    select: { customer: { select: { name: true } }, id: true, invoiceNo: true, termLabel: true, invoiceDate: true, dueDate: true, total: true, paidAmount: true, status: true },
     orderBy: { dueDate: "asc" },
     closedStatuses: ["Paid", "Cancelled"],
     dueField: "dueDate",
-    columns: ["invoiceNo", "termLabel", "invoiceDate", "dueDate", "total", "paidAmount", "status"],
+    columns: ["invoiceNo", "customer", "termLabel", "invoiceDate", "dueDate", "total", "paidAmount", "status"],
   },
   contract: {
     label: "Kontrak (garansi/AMC/kalibrasi)",
@@ -273,11 +278,12 @@ export const AGENT_MODULES: Record<string, ModuleDef> = {
     table: () => prisma.contract,
     refField: "contractNo",
     searchFields: ["contractNo", "title", "type"],
-    select: { id: true, contractNo: true, type: true, title: true, startDate: true, endDate: true, value: true, status: true },
+    hasCustomer: true,
+    select: { customer: { select: { name: true } }, id: true, contractNo: true, type: true, title: true, startDate: true, endDate: true, value: true, status: true },
     orderBy: { endDate: "asc" },
     closedStatuses: ["Renewed", "Terminated", "Expired"],
     dueField: "endDate",
-    columns: ["contractNo", "type", "title", "startDate", "endDate", "value", "status"],
+    columns: ["contractNo", "customer", "type", "title", "startDate", "endDate", "value", "status"],
   },
   customer: {
     label: "Customer",
@@ -316,11 +322,16 @@ export type Filter = "open" | "overdue" | "all";
 
 const today = () => new Date().toISOString().split("T")[0];
 
+/** Nilai kolom; relasi customer ditampilkan sebagai namanya saja. */
+const cell = (row: any, c: string) => (c === "customer" ? row.customer?.name : row[c]);
+
 function buildWhere(mod: ModuleDef, query: string | undefined, filter: Filter) {
   const and: Record<string, unknown>[] = [];
   const q = query?.trim();
   if (q) {
-    and.push({ OR: mod.searchFields.map(f => ({ [f]: { contains: q, mode: "insensitive" } })) });
+    const or: Record<string, unknown>[] = mod.searchFields.map(f => ({ [f]: { contains: q, mode: "insensitive" } }));
+    if (mod.hasCustomer) or.push({ customer: { name: { contains: q, mode: "insensitive" } } });
+    and.push({ OR: or });
   }
   if ((filter === "open" || filter === "overdue") && mod.closedStatuses) {
     and.push({ status: { notIn: mod.closedStatuses } });
@@ -336,7 +347,7 @@ export function toSummary(moduleId: string, row: any) {
   const mod = AGENT_MODULES[moduleId];
   const out: Record<string, unknown> = { ref: row[mod.refField] };
   for (const c of mod.columns) {
-    const v = row[c];
+    const v = cell(row, c);
     if (v === null || v === undefined || v === "") continue;
     out[c] = typeof v === "string" && v.length > 160 ? v.slice(0, 160) + "…" : v;
   }
@@ -379,5 +390,5 @@ export async function exportModule(moduleId: string, opts: { query?: string; fil
     orderBy: mod.orderBy,
     take: 1000,
   });
-  return (rows as any[]).map(r => Object.fromEntries(mod.columns.map(c => [c, r[c] ?? ""])));
+  return (rows as any[]).map(r => Object.fromEntries(mod.columns.map(c => [c, cell(r, c) ?? ""])));
 }
