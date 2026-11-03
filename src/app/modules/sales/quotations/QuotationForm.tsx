@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
+import VoiceButton from "@/components/VoiceButton";
 import { aiDraftQuotation, createQuotation, updateQuotation, type QuotationInput } from "../actions";
 import { DEFAULT_TEXT, DISCOUNT_APPROVAL_LIMIT, TAX_PERCENT, addDays, computeTotals, lineTotal, needsApproval, rupiah, today, type LineInput } from "../lib";
 import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
@@ -109,10 +110,13 @@ export default function QuotationForm({ customers, products, opportunities, init
         <Card title={<span className="flex items-center gap-2"><Sparkles className="w-4 h-4 text-indigo-600" aria-hidden /> Isi otomatis dengan AI</span>}>
           <div className="space-y-3">
             <label className={labelCls} htmlFor="ai-req">Kebutuhan customer</label>
-            <textarea
-              id="ai-req" rows={3} value={aiRequest} onChange={e => setAiRequest(e.target.value)} className={inputCls} disabled={aiPending}
-              placeholder="mis. 2 unit spektrofotometer UV-Vis untuk lab QC + 1 neraca analitik, minta diskon 5%, pengiriman ke Cikarang"
-            />
+            <div className="flex items-start gap-2">
+              <textarea
+                id="ai-req" rows={3} value={aiRequest} onChange={e => setAiRequest(e.target.value)} className={inputCls} disabled={aiPending}
+                placeholder="Ketik atau klik mikrofon lalu ucapkan, mis. 2 unit spektrofotometer UV-Vis untuk lab QC + 1 neraca analitik, minta diskon 5%"
+              />
+              <VoiceButton value={aiRequest} onChange={setAiRequest} disabled={aiPending} />
+            </div>
             <div className="flex flex-col sm:flex-row sm:items-center gap-3">
               <button type="button" className={btnPrimary} onClick={runAi} disabled={aiPending || !form.customerId || !aiRequest.trim()}>
                 {aiPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />} {aiPending ? "AI sedang menyusun draft…" : "Buat draft dengan AI"}

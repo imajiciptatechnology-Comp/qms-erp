@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MessageSquareText, X, Send, RotateCcw, ArrowRight, Download, FileSpreadsheet, Loader2, ExternalLink } from "lucide-react";
+import VoiceButton from "./VoiceButton";
 
 type ChatAction =
   | { kind: "navigate"; path: string; label: string }
@@ -27,6 +28,7 @@ const SUGGESTIONS = [
   "Tampilkan NC yang overdue lalu buka yang paling lama",
   "Download sertifikat kalibrasi terbaru Digital Caliper",
   "Export risiko yang masih open ke Excel",
+  "Buatkan penawaran untuk RSUP Harapan Sehat: 1 biosafety cabinet dan 2 inkubator",
 ];
 
 /** Unduh file Excel (.xlsx) dari isi base64 yang dikirim server. */
@@ -345,10 +347,11 @@ export default function AiAssistant() {
                 }}
                 rows={1}
                 maxLength={2000}
-                placeholder="Tulis pertanyaan atau perintah…"
+                placeholder="Tulis atau ucapkan perintah…"
                 aria-label="Pesan"
                 className="flex-1 resize-none max-h-32 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               />
+              <VoiceButton value={input} onChange={setInput} disabled={loading} />
               <button
                 type="submit"
                 disabled={loading || !input.trim()}
