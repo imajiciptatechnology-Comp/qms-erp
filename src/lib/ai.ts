@@ -77,6 +77,7 @@ async function requestWithFallback(
   const config = getConfig();
   const models = [...new Set([preferModel, ...config.models].filter((m): m is string => Boolean(m)))];
   let lastStatus: number | undefined;
+  let emptyAnswers = 0;
 
   for (const [i, model] of models.entries()) {
     const remaining = deadline - Date.now();
@@ -104,6 +105,7 @@ async function requestWithFallback(
       const hasOutput = message && (message.content || (Array.isArray(message.tool_calls) && message.tool_calls.length));
       if (hasOutput) return { message, model };
       console.warn(`[ai] ${model} mengembalikan jawaban kosong`);
+      emptyAnswers++;
       continue;
     }
 
@@ -116,6 +118,8 @@ async function requestWithFallback(
     throw new AiError(`Permintaan AI gagal (${res.status}): ${detail}`, res.status);
   }
 
+  // Model menjawab tapi isinya kosong (mis. rekaman tanpa ucapan) — bukan berarti sibuk.
+  if (emptyAnswers > 0) throw new AiError("AI tidak mengembalikan jawaban.");
   if (lastStatus === 429) throw new AiError("Kuota AI gratis sedang habis/terbatas. Coba lagi beberapa saat lagi.", 429);
   throw new AiError("Model AI sedang sibuk. Coba lagi beberapa saat lagi.", lastStatus);
 }
