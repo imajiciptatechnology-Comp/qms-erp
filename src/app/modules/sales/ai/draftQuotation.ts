@@ -76,7 +76,7 @@ Aturan:
 - Item HANYA boleh dari katalog (pakai "sku" persis). Jangan mengarang produk atau harga. Harga diisi sistem dari katalog.
 - Jika kebutuhan mencakup alat yang perlu dipasang (bukan jasa atau alat portable kecil), tambahkan jasa "Instalasi, Commissioning & Training" (sku LPI-SRV-003) bila ada di katalog dan belum diminta, sejumlah unit alat tersebut — kecuali user bilang tidak perlu.
 - Kebutuhan yang tidak ada di katalog tulis di "unmatched", jangan dipaksakan.
-- Diskon hanya jika diminta user atau lazim di contoh untuk customer yang sama; maksimal ${MAX_DISCOUNT}%. Diskon di atas 10% nanti butuh persetujuan Sales Manager.
+- Diskon hanya jika diminta user atau lazim di contoh untuk customer yang sama; maksimal ${MAX_DISCOUNT}%. Diskon di atas 10% nanti butuh persetujuan Sales Manager. Taruh diskon di SATU tempat saja: per item ("items[].discountPercent") jika berlaku untuk item tertentu, atau "discountPercent" (diskon total) jika untuk seluruh penawaran — jangan keduanya.
 - introText: pembuka surat seperti contoh (diawali "Dengan hormat,"), sebutkan alat yang ditawarkan. closingText: penutup seperti contoh. Masing-masing maksimal ±80 kata. Pisahkan paragraf dengan baris kosong.
 - Syarat pembayaran sesuaikan termin customer (${customer.paymentTerms}); untuk instansi pemerintah ikuti pola contoh pemerintah. Pengiriman: sebut indent bila ada item indent.
 - explanation: 1-3 kalimat untuk sales (bukan untuk customer): contoh mana yang dijadikan acuan, asumsi yang kamu ambil, dan hal yang perlu dicek.
@@ -123,13 +123,17 @@ Jawab HANYA JSON dengan bentuk:
     throw new Error(unmatched.length ? `AI tidak menemukan produk yang cocok di katalog: ${unmatched.join("; ")}` : "AI tidak menemukan produk yang cocok di katalog. Perjelas kebutuhannya.");
   }
 
+  // Diskon ganda (per item + total) akan memotong harga dua kali: pertahankan yang per item saja.
+  let discountPercent = clamp(ans.discountPercent, 0, MAX_DISCOUNT, 0);
+  if (discountPercent > 0 && items.some(i => i.discountPercent > 0)) discountPercent = 0;
+
   const str = (v: unknown, fallback: string) => (typeof v === "string" && v.trim() ? v.trim() : fallback);
   return {
     draft: {
       customerId: customer.id, opportunityId: input.opportunityId || null, date: today(), validUntil: addDays(today(), clamp(ans.validityDays, 7, 90, 30)),
       subject: str(ans.subject, "Penawaran Harga Peralatan Laboratorium"), attention: customer.contactName ?? "",
       introText: str(ans.introText, DEFAULT_TEXT.intro("")), closingText: str(ans.closingText, DEFAULT_TEXT.closing),
-      discountPercent: clamp(ans.discountPercent, 0, MAX_DISCOUNT, 0),
+      discountPercent,
       paymentTerms: str(ans.paymentTerms, DEFAULT_TEXT.payment), deliveryTerms: str(ans.deliveryTerms, DEFAULT_TEXT.delivery), warrantyTerms: str(ans.warrantyTerms, DEFAULT_TEXT.warranty),
       notes: `Draft AI dari permintaan: "${request.slice(0, 300)}"`, items,
     },
