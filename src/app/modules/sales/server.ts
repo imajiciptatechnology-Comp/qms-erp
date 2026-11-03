@@ -1,7 +1,7 @@
 // Helper server untuk modul Sales yang dipakai server actions DAN AI Assistant.
 // Sengaja bukan file "use server": fungsi di sini tidak boleh bisa dipanggil langsung dari browser.
 import { prisma } from "@/lib/prisma";
-import { STAGE_PROBABILITY, TAX_PERCENT, computeTotals, lineTotal, today, type LineInput } from "./lib";
+import { DEFAULT_TEXT, STAGE_PROBABILITY, TAX_PERCENT, computeTotals, lineTotal, today, type LineInput } from "./lib";
 
 export function addHistory(json: string, userName: string, action: string) {
   const list = JSON.parse(json || "[]");
@@ -11,11 +11,13 @@ export function addHistory(json: string, userName: string, action: string) {
 export const firstHistory = (userName: string, action: string) => addHistory("[]", userName, action);
 
 /** Nomor berikutnya: LPI/QUO/2026/11/0009 — urut per tahun per jenis dokumen. */
-export async function nextDocNo(kind: "QUO" | "SO" | "INV" | "CTR", date: string) {
+export async function nextDocNo(kind: "QUO" | "SO" | "INV" | "CTR" | "KWT" | "SPP", date: string) {
   const prefix = `LPI/${kind}/${date.slice(0, 4)}/`;
   const where = { startsWith: prefix };
   const rows: { no: string }[] =
-    kind === "QUO" ? (await prisma.quotation.findMany({ where: { quotationNo: where }, select: { quotationNo: true } })).map(r => ({ no: r.quotationNo }))
+    kind === "KWT" ? (await prisma.payment.findMany({ where: { receiptNo: where }, select: { receiptNo: true } })).map(r => ({ no: r.receiptNo ?? "" }))
+    : kind === "SPP" ? (await prisma.paymentReminder.findMany({ where: { letterNo: where }, select: { letterNo: true } })).map(r => ({ no: r.letterNo }))
+    : kind === "QUO" ? (await prisma.quotation.findMany({ where: { quotationNo: where }, select: { quotationNo: true } })).map(r => ({ no: r.quotationNo }))
     : kind === "SO" ? (await prisma.salesOrder.findMany({ where: { soNo: where }, select: { soNo: true } })).map(r => ({ no: r.soNo }))
     : kind === "INV" ? (await prisma.invoice.findMany({ where: { invoiceNo: where }, select: { invoiceNo: true } })).map(r => ({ no: r.invoiceNo }))
     : (await prisma.contract.findMany({ where: { contractNo: where }, select: { contractNo: true } })).map(r => ({ no: r.contractNo }));
@@ -45,9 +47,32 @@ export function quotationData(data: QuotationInput) {
   };
 }
 
+/**
+ * Kolom teks surat yang dibiarkan kosong di form diisi teks baku yang sesuai konteks:
+ * pembuka menyebut alat yang ditawarkan, syarat bayar mengikuti termin customer.
+ */
+export async function fillQuotationDefaults(data: QuotationInput): Promise<QuotationInput> {
+  const blank = (v?: string | null) => !v || !v.trim();
+  if (![data.introText, data.closingText, data.paymentTerms, data.deliveryTerms, data.warrantyTerms].some(blank)) return data;
+  const customer = await prisma.customer.findUnique({ where: { id: data.customerId }, select: { paymentTerms: true } });
+  const names = [...new Set(data.items.filter(i => i.description?.trim() && !/^(Jasa|Instalasi|Kontrak)/i.test(i.description)).map(i => i.description.split(" — ")[0].trim()))];
+  const topic = names.length > 1 ? `${names.slice(0, -1).join(", ")} dan ${names[names.length - 1]}` : names[0] ?? "";
+  const terms = customer?.paymentTerms ?? "30 hari";
+  return {
+    ...data,
+    introText: blank(data.introText) ? DEFAULT_TEXT.intro(topic) : data.introText,
+    closingText: blank(data.closingText) ? DEFAULT_TEXT.closing : data.closingText,
+    paymentTerms: blank(data.paymentTerms)
+      ? (/\d/.test(terms) ? `DP 30% setelah PO diterima; 70% setelah BAST instalasi. Pembayaran ${terms} setelah invoice diterima.` : `${terms}.`)
+      : data.paymentTerms,
+    deliveryTerms: blank(data.deliveryTerms) ? DEFAULT_TEXT.delivery : data.deliveryTerms,
+    warrantyTerms: blank(data.warrantyTerms) ? DEFAULT_TEXT.warranty : data.warrantyTerms,
+  };
+}
+
 /** Simpan penawaran baru berstatus Draft (+ majukan opportunity Lead/Qualified ke tahap Quotation). */
 export async function insertDraftQuotation(userName: string, data: QuotationInput, historyAction = "Penawaran dibuat") {
-  const { fields, items } = quotationData(data);
+  const { fields, items } = quotationData(await fillQuotationDefaults(data));
   const created = await prisma.quotation.create({ data: {
     ...fields, quotationNo: await nextDocNo("QUO", data.date), revision: 0, status: "Draft",
     salesName: userName, createdBy: userName, createdAt: today(), historyJson: firstHistory(userName, historyAction),

@@ -280,7 +280,48 @@ async function seedSales() {
       notes: "Perpanjangan sedang dinegosiasikan (OPP-2026-010).", createdAt: day(-395), historyJson: history("Kontrak AMC dibuat") },
   ] });
 
-  console.log("Data sales demo dibuat: 20 produk, 8 customer, 10 opportunity, 10 penawaran, 5 SO, 6 invoice, 4 kontrak.");
+  // ---------- Pelengkap dokumen: nomor seri, kwitansi, penandatangan, kontrak menunggu approval ----------
+  const serials = {
+    "SO-UNR": { "LPI-SPC-001": "UV28-2604-0117, UV28-2604-0118" },
+    "SO-PSL": { "LPI-BAL-002": "MA11-2608-0021", "LPI-BAL-001": "AB22-2608-0101, AB22-2608-0102, AB22-2608-0103" },
+    "SO-RSH-2025": { "LPI-REF-001": "LR4-2511-0031, LR4-2511-0032", "LPI-INC-001": "IN15-2510-0207, IN15-2510-0208", "LPI-AUT-001": "AV75-2509-0044" },
+  };
+  for (const [so, map] of Object.entries(serials)) {
+    for (const [sku, sn] of Object.entries(map)) {
+      await prisma.salesOrderItem.updateMany({ where: { salesOrderId: `${PREFIX}${so}`, productId: `${PREFIX}PRD-${sku}` }, data: { serialNumbers: sn } });
+    }
+  }
+  const pays = await prisma.payment.findMany({ where: { id: { startsWith: PREFIX } }, orderBy: { paymentDate: "asc" } });
+  const kwtSeq = {};
+  for (const p of pays) {
+    const y = p.paymentDate.slice(0, 4);
+    kwtSeq[y] = (kwtSeq[y] || 0) + 1;
+    await prisma.payment.update({ where: { id: p.id }, data: { receiptNo: docNo("KWT", p.paymentDate, kwtSeq[y]) } });
+  }
+  const signatories = {
+    UNR: ["Prof. Dr. apt. Hendra Gunawan, M.Si.", "Dekan Fakultas Farmasi"],
+    RSH: ["dr. Ratna Dewi, MARS", "Direktur Utama"],
+    FMI: ["Ir. Benny Santoso", "Plant Director"],
+    PSL: ["Lukas Hartanto", "Direktur"],
+    BBP: ["Ir. Wahyu Setiadi, M.T.", "Pejabat Pembuat Komitmen"],
+  };
+  for (const [key, [name, title]] of Object.entries(signatories)) {
+    await prisma.customer.update({ where: { id: cust[key] }, data: { signatoryName: name, signatoryTitle: title } });
+  }
+  // Invoice kalibrasi UNR adalah tagihan periode kontrak CTR-2 (mencegah tagih ganda dari menu Invoice baru).
+  const ctr2 = await prisma.contract.findUniqueOrThrow({ where: { id: `${PREFIX}CTR-2` } });
+  await prisma.invoice.update({ where: { id: `${PREFIX}INV-UNR-CAL` }, data: { contractId: ctr2.id, periodLabel: `Periode ${ctr2.startDate} s/d ${ctr2.endDate}` } });
+  // Kontrak kalibrasi PSL: diajukan 9 hari kerja lalu, batas approval (7 hari kerja) sudah lewat.
+  await prisma.contract.create({ data: {
+    id: `${PREFIX}CTR-5`, contractNo: docNo("CTR", day(-12), 5), customerId: cust.PSL, salesOrderId: `${PREFIX}SO-PSL`, type: "Kalibrasi",
+    title: "Kalibrasi Berkala Neraca & Moisture Analyzer", startDate: day(5), endDate: day(369), value: 2750000 * 4 * 2, visitsPerYear: 2,
+    coveredItemsJson: covered(["PrecisaLab MA-110H", "MA11-2608-0021"], ["PrecisaLab AB-220i", "AB22-2608-0101"], ["PrecisaLab AB-220i", "AB22-2608-0102"], ["PrecisaLab AB-220i", "AB22-2608-0103"]),
+    status: "Waiting Approval", approvalDueDate: day(-2), responseTime: "2x24 jam hari kerja", billingSchedule: "Quarterly",
+    signatoryName: "Lukas Hartanto", signatoryTitle: "Direktur", picName: "Teknisi: Yusuf Maulana", createdAt: day(-12),
+    notes: "Customer minta sertifikat kalibrasi terakreditasi.", historyJson: history("Diajukan untuk persetujuan", SALES_B),
+  } });
+
+  console.log("Data sales demo dibuat: 20 produk, 8 customer, 10 opportunity, 10 penawaran, 5 SO, 6 invoice, 5 kontrak.");
 }
 
 module.exports = { seedSales, clearSales };

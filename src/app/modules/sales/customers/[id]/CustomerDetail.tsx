@@ -10,6 +10,7 @@ import CustomerModal, { type CustomerFormValue } from "../CustomerModal";
 type C = {
   id: string; customerNo: string; name: string; type: string; npwp: string | null; address: string | null; city: string | null; contactName: string | null; contactTitle: string | null;
   contactEmail: string | null; contactPhone: string | null; paymentTerms: string; notes: string | null; historyJson: string;
+  signatoryName: string | null; signatoryTitle: string | null;
   opportunities: { id: string; opportunityNo: string; title: string; stage: string; estimatedValue: number }[];
   quotations: { id: string; quotationNo: string; revision: number; subject: string; date: string; status: string; total: number }[];
   salesOrders: { id: string; soNo: string; customerPoNo: string; orderDate: string; status: string; total: number }[];
@@ -37,6 +38,7 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
           <button className={btnSecondary} onClick={() => setEditing({
             id: c.id, name: c.name, type: c.type, npwp: n(c.npwp), address: n(c.address), city: n(c.city), contactName: n(c.contactName), contactTitle: n(c.contactTitle),
             contactEmail: n(c.contactEmail), contactPhone: n(c.contactPhone), paymentTerms: c.paymentTerms, notes: n(c.notes),
+            signatoryName: n(c.signatoryName), signatoryTitle: n(c.signatoryTitle),
           })}><Pencil className="w-4 h-4" /> Edit</button>
         )}
       </div>
@@ -85,6 +87,7 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
               <InfoRow label="Alamat">{c.address}</InfoRow>
               <InfoRow label="NPWP">{c.npwp}</InfoRow>
               <InfoRow label="Termin bayar">{c.paymentTerms}</InfoRow>
+              <InfoRow label="Penandatangan kontrak">{c.signatoryName ? `${c.signatoryName}${c.signatoryTitle ? ` — ${c.signatoryTitle}` : ""}` : null}</InfoRow>
               {c.notes && <InfoRow label="Catatan">{c.notes}</InfoRow>}
             </dl>
           </Card>

@@ -8,7 +8,7 @@ import { Card, StatCard, StatusBadge } from "./ui";
 export default async function SalesOverviewPage() {
   const { access } = await getSalesAccess();
   if (!access.canView) return null;
-  const { opportunities, waitingApproval, openInvoices, activeContracts, openOrders } = await getSalesOverview();
+  const { opportunities, waitingApproval, contractApprovals, openInvoices, activeContracts, openOrders } = await getSalesOverview();
 
   const open = opportunities.filter(o => !["Won", "Lost"].includes(o.stage));
   const pipelineValue = open.reduce((s, o) => s + o.estimatedValue, 0);
@@ -57,8 +57,26 @@ export default async function SalesOverviewPage() {
           </table>
         </Card>
 
-        <Card title={`Menunggu persetujuan (${waitingApproval.length})`} className="xl:col-span-2">
-          {waitingApproval.length === 0 ? <p className="text-sm text-slate-500">Tidak ada penawaran yang menunggu persetujuan.</p> : (
+        <Card title={`Menunggu persetujuan (${waitingApproval.length + contractApprovals.length})`} className="xl:col-span-2">
+          {contractApprovals.length > 0 && (
+            <ul className="divide-y divide-slate-100 mb-2">
+              {contractApprovals.map(c => {
+                const late = !!c.approvalDueDate && today() > c.approvalDueDate;
+                return (
+                  <li key={c.id}>
+                    <Link href={`/modules/sales/contracts/${c.id}`} className="flex items-center justify-between gap-4 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-800 text-sm">{c.contractNo} <span className="text-slate-500 font-normal">· Kontrak {c.type}</span></p>
+                        <p className="text-xs text-slate-500 truncate">{c.customer.name} · {rupiah(c.value)}</p>
+                      </div>
+                      <span className={`text-xs font-semibold shrink-0 ${late ? "text-red-700" : "text-amber-800"}`}>{late ? `Lewat batas ${c.approvalDueDate}` : `Batas ${c.approvalDueDate}`}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {waitingApproval.length === 0 ? (contractApprovals.length ? null : <p className="text-sm text-slate-500">Tidak ada penawaran atau kontrak yang menunggu persetujuan.</p>) : (
             <ul className="divide-y divide-slate-100">
               {waitingApproval.map(q => (
                 <li key={q.id}>

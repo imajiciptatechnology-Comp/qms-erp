@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import VoiceButton from "@/components/VoiceButton";
 import { aiDraftQuotation, createQuotation, updateQuotation, type QuotationInput } from "../actions";
-import { DEFAULT_TEXT, DISCOUNT_APPROVAL_LIMIT, TAX_PERCENT, addDays, computeTotals, lineTotal, needsApproval, rupiah, today, type LineInput } from "../lib";
+import { DISCOUNT_APPROVAL_LIMIT, TAX_PERCENT, addDays, computeTotals, lineTotal, needsApproval, rupiah, today, type LineInput } from "../lib";
 import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
 
 type Customer = { id: string; name: string; contactName: string | null; paymentTerms: string; type: string };
@@ -22,8 +22,9 @@ export default function QuotationForm({ customers, products, opportunities, init
   const { pending, error, exec } = useAction();
   const [form, setForm] = useState<QuotationInput>(initial ?? {
     customerId: "", opportunityId: null, date: today(), validUntil: addDays(today(), 30), subject: "", attention: "",
-    introText: DEFAULT_TEXT.intro(""), closingText: DEFAULT_TEXT.closing, discountPercent: 0,
-    paymentTerms: DEFAULT_TEXT.payment, deliveryTerms: DEFAULT_TEXT.delivery, warrantyTerms: DEFAULT_TEXT.warranty, notes: "", items: [emptyLine()],
+    // Teks surat & syarat sengaja kosong: diisi AI, atau teks baku saat disimpan (lihat fillQuotationDefaults).
+    introText: "", closingText: "", discountPercent: 0,
+    paymentTerms: "", deliveryTerms: "", warrantyTerms: "", notes: "", items: [emptyLine()],
   });
   const [aiRequest, setAiRequest] = useState("");
   const [aiPending, setAiPending] = useState(false);
@@ -199,13 +200,13 @@ export default function QuotationForm({ customers, products, opportunities, init
         )}
       </Card>
 
-      <Card title="Teks surat & syarat">
+      <Card title="Teks surat & syarat" actions={<span className="text-xs text-slate-500">Kolom kosong otomatis diisi teks baku saat disimpan</span>}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div><label className={labelCls} htmlFor="q-intro">Paragraf pembuka</label><textarea id="q-intro" rows={6} value={form.introText ?? ""} onChange={e => set("introText", e.target.value)} className={inputCls} /></div>
-          <div><label className={labelCls} htmlFor="q-close">Paragraf penutup</label><textarea id="q-close" rows={6} value={form.closingText ?? ""} onChange={e => set("closingText", e.target.value)} className={inputCls} /></div>
-          <div><label className={labelCls} htmlFor="q-pay">Syarat pembayaran</label><textarea id="q-pay" rows={2} value={form.paymentTerms ?? ""} onChange={e => set("paymentTerms", e.target.value)} className={inputCls} /></div>
-          <div><label className={labelCls} htmlFor="q-del">Pengiriman</label><textarea id="q-del" rows={2} value={form.deliveryTerms ?? ""} onChange={e => set("deliveryTerms", e.target.value)} className={inputCls} /></div>
-          <div><label className={labelCls} htmlFor="q-war">Garansi</label><textarea id="q-war" rows={2} value={form.warrantyTerms ?? ""} onChange={e => set("warrantyTerms", e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls} htmlFor="q-intro">Paragraf pembuka</label><textarea id="q-intro" placeholder="Kosongkan untuk memakai pembuka baku (menyebut alat yang ditawarkan), atau isi otomatis dengan AI." rows={6} value={form.introText ?? ""} onChange={e => set("introText", e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls} htmlFor="q-close">Paragraf penutup</label><textarea id="q-close" placeholder="Kosongkan untuk memakai penutup baku." rows={6} value={form.closingText ?? ""} onChange={e => set("closingText", e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls} htmlFor="q-pay">Syarat pembayaran</label><textarea id="q-pay" placeholder="Kosongkan: mengikuti termin bayar customer." rows={2} value={form.paymentTerms ?? ""} onChange={e => set("paymentTerms", e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls} htmlFor="q-del">Pengiriman</label><textarea id="q-del" placeholder="Kosongkan: Franco lokasi customer; ready 2–3 minggu, indent 8–12 minggu." rows={2} value={form.deliveryTerms ?? ""} onChange={e => set("deliveryTerms", e.target.value)} className={inputCls} /></div>
+          <div><label className={labelCls} htmlFor="q-war">Garansi</label><textarea id="q-war" placeholder="Kosongkan: garansi 12 bulan sejak BAST." rows={2} value={form.warrantyTerms ?? ""} onChange={e => set("warrantyTerms", e.target.value)} className={inputCls} /></div>
           <div><label className={labelCls} htmlFor="q-notes">Catatan internal (tidak dicetak)</label><textarea id="q-notes" rows={2} value={form.notes ?? ""} onChange={e => set("notes", e.target.value)} className={inputCls} /></div>
         </div>
       </Card>

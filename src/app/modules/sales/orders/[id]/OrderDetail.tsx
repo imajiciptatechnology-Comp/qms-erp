@@ -6,7 +6,7 @@ import { ArrowLeft, Ban, CheckSquare, FileText, Receipt, Square, Truck, X } from
 import ModalShell from "@/components/ui/ModalShell";
 import { advanceSalesOrder, cancelSalesOrder, createInvoiceFromSchedule, toggleContractReview } from "../../actions";
 import { contractState, invoiceState, rupiah, today, type SalesAccess } from "../../lib";
-import { Card, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
+import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
 
 type SO = {
   id: string; soNo: string; customerPoNo: string; customerPoDate: string; customerPoFile: string | null; orderDate: string; status: string;
@@ -49,6 +49,8 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
           <p className="text-sm text-slate-500"><Link href={`/modules/sales/customers/${so.customer.id}`} className="hover:underline">{so.customer.name}</Link> · PO {so.customerPoNo}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <DocLinks kind="order-confirmation" id={so.id} label="Konfirmasi" formats={["pdf", "docx"]} />
+          {["In Delivery", "Installed", "Completed"].includes(so.status) && <DocLinks kind="bast" id={so.id} label="BAST" formats={["pdf", "docx"]} />}
           {access.canApprove && !["Completed", "Cancelled"].includes(so.status) && <button className={btnDanger} disabled={pending} onClick={cancel}><Ban className="w-4 h-4" /> Batalkan</button>}
           {m && NEXT_LABEL[so.status] && <button className={btnPrimary} disabled={pending} onClick={advance}><Truck className="w-4 h-4" /> {NEXT_LABEL[so.status]}</button>}
         </div>

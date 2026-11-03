@@ -35,6 +35,32 @@ export const addDays = (date: string, n: number) => {
 };
 export const daysBetween = (from: string, to: string) => Math.round((new Date(to).getTime() - new Date(from).getTime()) / 864e5);
 
+/** Tambah n hari kerja (Senin-Jumat; hari libur nasional belum diperhitungkan). */
+export function addBusinessDays(date: string, n: number) {
+  const d = new Date(date + "T00:00:00Z");
+  while (n > 0) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    const day = d.getUTCDay();
+    if (day !== 0 && day !== 6) n--;
+  }
+  return d.toISOString().split("T")[0];
+}
+
+/** Batas waktu keputusan approval kontrak. */
+export const CONTRACT_APPROVAL_BUSINESS_DAYS = 7;
+
+/** Periode tagih kontrak: Upfront = 1x 100% di awal; Quarterly = 4x 25% per triwulan. */
+export function contractBillingPeriods(c: { startDate: string; endDate: string; billingSchedule: string }) {
+  if (c.billingSchedule !== "Quarterly") return [{ index: 0, label: `Periode ${c.startDate} s/d ${c.endDate}`, percent: 100, start: c.startDate }];
+  const start = new Date(c.startDate).getTime();
+  const span = new Date(c.endDate).getTime() - start;
+  return [0, 1, 2, 3].map(i => {
+    const s = new Date(start + (span * i) / 4).toISOString().split("T")[0];
+    const e = new Date(start + (span * (i + 1)) / 4 - 864e5).toISOString().split("T")[0];
+    return { index: i, label: `Triwulan ${i + 1} (${s} s/d ${e})`, percent: 25, start: s };
+  });
+}
+
 export type LineInput = { productId?: string | null; description: string; specs?: string | null; qty: number; unit: string; unitPrice: number; discountPercent?: number };
 
 export function lineTotal(l: LineInput) {

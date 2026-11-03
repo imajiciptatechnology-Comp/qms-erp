@@ -12,13 +12,13 @@ datasource db {
 // ---------------------------------------------------------
 
 model NCR {
-  id                String   @id @default(cuid())
-  ncNumber          String   @unique
-  source            String   @default("System")
+  id                String  @id @default(cuid())
+  ncNumber          String  @unique
+  source            String  @default("System")
   department        String
   process           String
   description       String
-  severity          String   @default("Minor")
+  severity          String  @default("Minor")
   detectedBy        String?
   productBatch      String?
   isoClause         String?
@@ -36,68 +36,67 @@ model NCR {
   rcaJson           String?
   actionPlanJson    String?
   verificationJson  String?
-  historyJson       String   @default("[]")
+  historyJson       String  @default("[]")
 }
 
 model Audit {
-  id              String         @id @default(cuid())
-  auditNo         String         @unique
-  department      String
-  plannedDate     String
-  actualDate      String?
-  leadAuditor     String
-  leadAuditorId   String
-  status          String
-  auditType       String?
-  findingsCount   Int            @default(0)
-  ofiCount        Int            @default(0)
-  findings        AuditFinding[]
+  id            String         @id @default(cuid())
+  auditNo       String         @unique
+  department    String
+  plannedDate   String
+  actualDate    String?
+  leadAuditor   String
+  leadAuditorId String
+  status        String
+  auditType     String?
+  findingsCount Int            @default(0)
+  ofiCount      Int            @default(0)
+  findings      AuditFinding[]
 }
 
 model AuditFinding {
-  id               String   @id @default(cuid())
+  id               String  @id @default(cuid())
   auditId          String
   description      String
   requirement      String
   type             String
   status           String
   correctiveAction String?
-  audit            Audit    @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  audit            Audit   @relation(fields: [auditId], references: [id], onDelete: Cascade)
 }
 
 model Document {
-  id               String  @id @default(cuid())
-  docNumber        String  @unique
-  title            String
-  type             String
-  revision         Int
-  status           String
-  department       String
-  lastUpdated      String
-  uploaderId       String?
-  uploaderName     String?
-  fileName         String?
-  fileSize         Int?
-  changeLog        String?
-  nextReviewDate   String?
-  parentId         String?
-  effectiveDate    String?
-  approverName     String?
-  approvedDate     String?
-  origin           String  @default("Internal")
-  retentionPeriod  Int?
-  isRestricted     Boolean @default(false)
-  rejectionReason  String?
-  relatedDocIdsJson    String @default("[]")
-  distributionListJson String @default("[]")
-  acknowledgmentsJson  String @default("[]")
-  historyJson          String @default("[]")
+  id                   String  @id @default(cuid())
+  docNumber            String  @unique
+  title                String
+  type                 String
+  revision             Int
+  status               String
+  department           String
+  lastUpdated          String
+  uploaderId           String?
+  uploaderName         String?
+  fileName             String?
+  fileSize             Int?
+  changeLog            String?
+  nextReviewDate       String?
+  parentId             String?
+  effectiveDate        String?
+  approverName         String?
+  approvedDate         String?
+  origin               String  @default("Internal")
+  retentionPeriod      Int?
+  isRestricted         Boolean @default(false)
+  rejectionReason      String?
+  relatedDocIdsJson    String  @default("[]")
+  distributionListJson String  @default("[]")
+  acknowledgmentsJson  String  @default("[]")
+  historyJson          String  @default("[]")
 }
 
 // ---------------------------------------------------------
 // TRAINING & HR MODULES
 // ---------------------------------------------------------
-
 
 // ---------------------------------------------------------
 // RISK & OBJECTIVES MODULES
@@ -155,39 +154,39 @@ model QualityObjective {
 }
 
 model Measurement {
-  id           String           @id @default(cuid())
-  objectiveId  String
-  date         String
-  value        Float
-  notes        String?
-  recordedBy   String
-  objective    QualityObjective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
+  id          String           @id @default(cuid())
+  objectiveId String
+  date        String
+  value       Float
+  notes       String?
+  recordedBy  String
+  objective   QualityObjective @relation(fields: [objectiveId], references: [id], onDelete: Cascade)
 }
 
 model Training {
-  id               String  @id @default(cuid())
-  trainingNo       String  @unique
-  title            String
-  type             String
-  category         String
-  department       String
-  trainer          String
-  plannedDate      String
-  actualDate       String?
-  durationHours    Float?
-  status           String
-  objectives       String?
-  evidenceFileName String?
-  isoClause        String?
+  id                String  @id @default(cuid())
+  trainingNo        String  @unique
+  title             String
+  type              String
+  category          String
+  department        String
+  trainer           String
+  plannedDate       String
+  actualDate        String?
+  durationHours     Float?
+  status            String
+  objectives        String?
+  evidenceFileName  String?
+  isoClause         String?
   effectivenessJson String?
-  passingScore     Int?
-  ncReferenceId    String?
-  ncReferenceNo    String?
-  isMandatory      Boolean @default(false)
-  reminderSent     Boolean @default(false)
-  creatorId        String
-  lastUpdated      String
-  participantsJson String  @default("[]")
+  passingScore      Int?
+  ncReferenceId     String?
+  ncReferenceNo     String?
+  isMandatory       Boolean @default(false)
+  reminderSent      Boolean @default(false)
+  creatorId         String
+  lastUpdated       String
+  participantsJson  String  @default("[]")
 }
 
 model CompetencyRequirement {
@@ -202,8 +201,8 @@ model CompetencyRequirement {
 // ---------------------------------------------------------
 
 model Complaint {
-  id                String  @id @default(cuid())
-  complaintNo       String  @unique
+  id                String   @id @default(cuid())
+  complaintNo       String   @unique
   source            String
   customerName      String
   customerContact   String?
@@ -225,21 +224,21 @@ model Complaint {
   feedbackNotes     String?
   ncReferenceId     String?
   ncReferenceNo     String?
-  slaTargetDays     Int     @default(7)
+  slaTargetDays     Int      @default(7)
   createdAt         String
-  historyJson       String  @default("[]")
+  historyJson       String   @default("[]")
 }
 
 model SatisfactionSurvey {
-  id          String   @id @default(cuid())
-  surveyNo    String   @unique
-  title       String
-  period      String
-  status      String
-  createdAt   String
-  closedAt    String?
-  avgScore    Float?
-  responsesJson String @default("[]")
+  id            String  @id @default(cuid())
+  surveyNo      String  @unique
+  title         String
+  period        String
+  status        String
+  createdAt     String
+  closedAt      String?
+  avgScore      Float?
+  responsesJson String  @default("[]")
 }
 
 model Supplier {
@@ -329,17 +328,17 @@ model PMRecord {
 }
 
 model WorkOrder {
-  id               String   @id @default(cuid())
-  productName      String
-  targetQuantity   Int
-  actualQuantity   Int?
-  startDate        String
-  endDate          String
-  status           String
-  operator         String
-  machineId        String
-  notes            String
-  qcRequested      Boolean  @default(false)
+  id             String  @id @default(cuid())
+  productName    String
+  targetQuantity Int
+  actualQuantity Int?
+  startDate      String
+  endDate        String
+  status         String
+  operator       String
+  machineId      String
+  notes          String
+  qcRequested    Boolean @default(false)
 }
 
 model Shipment {
@@ -356,13 +355,13 @@ model Shipment {
 }
 
 model ShipmentItem {
-  id            String   @id @default(cuid())
-  shipmentId    String
-  productName   String
-  quantity      Int
-  lotNumber     String
-  workOrderId   String?
-  shipment      Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  shipmentId  String
+  productName String
+  quantity    Int
+  lotNumber   String
+  workOrderId String?
+  shipment    Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
 }
 
 model Asset {
@@ -378,7 +377,7 @@ model Asset {
 }
 
 model MaintenanceRecord {
-  id            String  @id @default(cuid())
+  id            String @id @default(cuid())
   assetId       String
   type          String
   date          String
@@ -387,27 +386,27 @@ model MaintenanceRecord {
   status        String
   downtimeHours Float?
   cost          Float?
-  asset         Asset   @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  asset         Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
 }
 
 model Welder {
-  id            String @id @default(cuid())
-  stampNumber   String @unique
-  name          String
-  processType   String
-  position      String
-  expiryDate    String
-  status        String
-  notes         String?
+  id          String  @id @default(cuid())
+  stampNumber String  @unique
+  name        String
+  processType String
+  position    String
+  expiryDate  String
+  status      String
+  notes       String?
 }
 
 model WPS {
-  id            String @id
-  baseMetal     String
-  fillerMetal   String
-  processType   String
-  status        String
-  issueDate     String
+  id          String @id
+  baseMetal   String
+  fillerMetal String
+  processType String
+  status      String
+  issueDate   String
 }
 
 // ---------------------------------------------------------
@@ -459,7 +458,7 @@ model Moc {
 // ---------------------------------------------------------
 
 model DesignProject {
-  id              String          @id @default(cuid())
+  id              String         @id @default(cuid())
   projectName     String
   description     String
   picName         String
@@ -467,10 +466,10 @@ model DesignProject {
   startDate       String
   expectedEndDate String
   status          String
-  planningJson    String          @default("{}")
-  inputsJson      String          @default("{}")
-  controlsJson    String          @default("{}")
-  outputsJson     String          @default("{}")
+  planningJson    String         @default("{}")
+  inputsJson      String         @default("{}")
+  controlsJson    String         @default("{}")
+  outputsJson     String         @default("{}")
   tasks           DesignTask[]
   changes         DesignChange[]
 }
@@ -499,29 +498,28 @@ model DesignChange {
   project          DesignProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
-
 model User {
-  id String @id @default(cuid())
-  name String
-  email String @unique
+  id           String  @id @default(cuid())
+  name         String
+  email        String  @unique
   passwordHash String
-  role String
-  department String
-  photoUrl String?
-  phone String?
-  bio String?
+  role         String
+  department   String
+  photoUrl     String?
+  phone        String?
+  bio          String?
 }
 
 model ApprovalRouting {
-  id String @id @default(cuid())
+  id         String   @id @default(cuid())
   moduleType String
-  recordId String
-  stage Int
+  recordId   String
+  stage      Int
   approverId String
-  status String
-  notes String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status     String
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 // ---------------------------------------------------------
@@ -540,27 +538,29 @@ model KvStore {
 // ---------------------------------------------------------
 
 model Customer {
-  id            String        @id @default(cuid())
-  customerNo    String        @unique
-  name          String
-  type          String // Universitas | Rumah Sakit | Farmasi | Lab Pangan | Pemerintah | Industri
-  npwp          String?
-  address       String?
-  city          String?
-  contactName   String?
-  contactTitle  String?
-  contactEmail  String?
-  contactPhone  String?
-  paymentTerms  String        @default("30 hari")
-  status        String        @default("Active")
-  notes         String?
-  createdAt     String
-  historyJson   String        @default("[]")
-  opportunities Opportunity[]
-  quotations    Quotation[]
-  salesOrders   SalesOrder[]
-  invoices      Invoice[]
-  contracts     Contract[]
+  id             String        @id @default(cuid())
+  customerNo     String        @unique
+  name           String
+  type           String // Universitas | Rumah Sakit | Farmasi | Lab Pangan | Pemerintah | Industri
+  npwp           String?
+  address        String?
+  city           String?
+  contactName    String?
+  contactTitle   String?
+  contactEmail   String?
+  contactPhone   String?
+  paymentTerms   String        @default("30 hari")
+  status         String        @default("Active")
+  notes          String?
+  createdAt      String
+  historyJson    String        @default("[]")
+  opportunities  Opportunity[]
+  quotations     Quotation[]
+  salesOrders    SalesOrder[]
+  invoices       Invoice[]
+  contracts      Contract[]
+  signatoryName  String?
+  signatoryTitle String?
 }
 
 model Product {
@@ -701,8 +701,8 @@ model SalesOrderItem {
 }
 
 model Invoice {
-  id            String      @id @default(cuid())
-  invoiceNo     String      @unique
+  id            String            @id @default(cuid())
+  invoiceNo     String            @unique
   customerId    String
   salesOrderId  String?
   termLabel     String
@@ -712,15 +712,48 @@ model Invoice {
   subtotal      Float
   taxAmount     Float
   total         Float
-  paidAmount    Float       @default(0)
+  paidAmount    Float             @default(0)
   status        String // Unpaid | Partial | Paid | Cancelled
   fakturPajakNo String?
   notes         String?
   createdAt     String
-  historyJson   String      @default("[]")
-  customer      Customer    @relation(fields: [customerId], references: [id])
-  salesOrder    SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  historyJson   String            @default("[]")
+  customer      Customer          @relation(fields: [customerId], references: [id])
+  salesOrder    SalesOrder?       @relation(fields: [salesOrderId], references: [id])
   payments      Payment[]
+  contractId    String?
+  contract      Contract?         @relation(fields: [contractId], references: [id])
+  periodLabel   String?
+  items         InvoiceItem[]
+  reminders     PaymentReminder[]
+}
+
+/// Rincian invoice manual / dari kontrak (invoice per termin SO tidak memakai tabel ini).
+model InvoiceItem {
+  id          String  @id @default(cuid())
+  invoiceId   String
+  productId   String?
+  description String
+  qty         Float
+  unit        String
+  unitPrice   Float
+  lineTotal   Float
+  sortOrder   Int     @default(0)
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+/// Surat pengingat pembayaran (disusun AI, disimpan agar bisa dicetak ulang & diaudit).
+model PaymentReminder {
+  id        String  @id @default(cuid())
+  letterNo  String  @unique
+  invoiceId String
+  level     Int // 1 = pengingat, 2 = peringatan, 3 = peringatan terakhir
+  date      String
+  subject   String
+  body      String
+  createdBy String
+  createdAt String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 }
 
 model Payment {
@@ -734,25 +767,41 @@ model Payment {
   receivedBy  String
   createdAt   String
   invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  receiptNo   String?
 }
 
 model Contract {
-  id               String      @id @default(cuid())
-  contractNo       String      @unique
-  customerId       String
-  salesOrderId     String?
-  type             String // Garansi | Service | Kalibrasi | AMC
-  title            String
-  startDate        String
-  endDate          String
-  value            Float       @default(0)
-  visitsPerYear    Int?
-  coveredItemsJson String      @default("[]")
-  status           String // Active | Expired | Terminated | Renewed
-  picName          String?
-  notes            String?
-  createdAt        String
-  historyJson      String      @default("[]")
-  customer         Customer    @relation(fields: [customerId], references: [id])
-  salesOrder       SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  id                String      @id @default(cuid())
+  contractNo        String      @unique
+  customerId        String
+  salesOrderId      String?
+  type              String // Garansi | Service | Kalibrasi | AMC
+  title             String
+  startDate         String
+  endDate           String
+  value             Float       @default(0)
+  visitsPerYear     Int?
+  coveredItemsJson  String      @default("[]")
+  status            String // Active | Expired | Terminated | Renewed
+  picName           String?
+  notes             String?
+  createdAt         String
+  historyJson       String      @default("[]")
+  customer          Customer    @relation(fields: [customerId], references: [id])
+  salesOrder        SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  invoices          Invoice[]
+  // Dokumen perjanjian (AMC/Kalibrasi/Service). Status lengkap: Draft | Waiting Approval | Approved | Sent | Active | Expired | Terminated | Renewed
+  scope             String?
+  responseTime      String?
+  paymentTerms      String?
+  billingSchedule   String      @default("Upfront") // Upfront | Quarterly
+  sparePartDiscount Float?
+  signatoryName     String?
+  signatoryTitle    String?
+  clausesJson       String      @default("[]")
+  approvalDueDate   String?
+  approvedBy        String?
+  approvedAt        String?
+  signedFileUrl     String?
+  renewedFromId     String?
 }

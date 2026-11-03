@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Receipt, Search } from "lucide-react";
+import { Plus, Receipt, Search } from "lucide-react";
 import EmptyTableRow from "@/components/ui/EmptyTableRow";
 import TableFooter from "@/components/ui/TableFooter";
 import { daysBetween, invoiceState, rupiah, rupiahShort, today } from "../lib";
-import { StatusBadge, inputCls } from "../ui";
+import { StatusBadge, btnPrimary, inputCls } from "../ui";
 
 type Row = { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string; customer: { name: string }; salesOrder: { soNo: string } | null };
 
@@ -18,7 +18,7 @@ const BUCKETS = [
   { label: "> 60 hari", test: (d: number) => d > 60 },
 ];
 
-export default function InvoiceList({ invoices }: { invoices: Row[] }) {
+export default function InvoiceList({ invoices, canFinance }: { invoices: Row[]; canFinance: boolean }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("Open");
   const rows = useMemo(() => invoices.map(i => ({ ...i, state: invoiceState(i), outstanding: i.status === "Cancelled" ? 0 : i.total - i.paidAmount })), [invoices]);
@@ -53,6 +53,7 @@ export default function InvoiceList({ invoices }: { invoices: Row[] }) {
         <select aria-label="Filter status" value={filter} onChange={e => setFilter(e.target.value)} className={`${inputCls} sm:w-52`}>
           <option value="Open">Belum lunas</option><option value="Overdue">Lewat jatuh tempo</option><option value="Paid">Lunas</option><option value="Cancelled">Dibatalkan</option><option value="All">Semua</option>
         </select>
+        {canFinance && <Link href="/modules/sales/invoices/new" className={`${btnPrimary} sm:ml-auto justify-center`}><Plus className="w-4 h-4" /> New Invoice</Link>}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

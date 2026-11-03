@@ -24,6 +24,7 @@ export default function CustomerModal({ value, onClose }: { value: CustomerFormV
           exec(() => saveCustomer(v.id ?? null, {
             name: f.name, type: f.type, npwp: f.npwp || undefined, address: f.address || undefined, city: f.city || undefined, contactName: f.contactName || undefined,
             contactTitle: f.contactTitle || undefined, contactEmail: f.contactEmail || undefined, contactPhone: f.contactPhone || undefined, paymentTerms: f.paymentTerms || "30 hari", notes: f.notes || undefined,
+            signatoryName: f.signatoryName || undefined, signatoryTitle: f.signatoryTitle || undefined,
           }), onClose);
         }}>
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -41,6 +42,8 @@ export default function CustomerModal({ value, onClose }: { value: CustomerFormV
             {field("contactTitle", "Jabatan")}
             {field("contactEmail", "Email", { type: "email" })}
             {field("contactPhone", "Telepon")}
+            {field("signatoryName", "Penandatangan kontrak")}
+            {field("signatoryTitle", "Jabatan penandatangan")}
             <div className="sm:col-span-2">{field("notes", "Catatan")}</div>
             <div className="sm:col-span-2"><ErrorNote error={error} /></div>
           </div>

@@ -5,5 +5,5 @@ import InvoiceList from "./InvoiceList";
 export default async function InvoicesPage() {
   const { access } = await getSalesAccess();
   if (!access.canView) return null;
-  return <InvoiceList invoices={await getInvoices()} />;
+  return <InvoiceList invoices={await getInvoices()} canFinance={access.canFinance} />;
 }

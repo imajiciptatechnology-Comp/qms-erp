@@ -2,6 +2,7 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import { FileDown } from "lucide-react";
 import { STATUS_COLORS } from "./lib";
 
 export const inputCls = "w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
@@ -101,4 +102,25 @@ export function useAction() {
 export function ErrorNote({ error }: { error: string | null }) {
   if (!error) return null;
   return <p role="alert" className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>;
+}
+
+/** Tautan unduh dokumen ber-kop (lihat documents/[kind]/[id]/route.ts). */
+export function DocLinks({ kind, id, label, formats = ["pdf", "docx"], small }: { kind: string; id: string; label?: string; formats?: ("pdf" | "docx")[]; small?: boolean }) {
+  const cls = small
+    ? "inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline"
+    : btnSecondary;
+  return (
+    <>
+      {formats.map(f => (
+        <a
+          key={f}
+          href={`/modules/sales/documents/${kind}/${id}?format=${f}`}
+          {...(f === "pdf" ? { target: "_blank", rel: "noreferrer" } : {})}
+          className={cls}
+        >
+          <FileDown className={small ? "w-3.5 h-3.5" : "w-4 h-4"} aria-hidden /> {label ? `${label} ` : ""}{f === "pdf" ? "PDF" : "Word"}
+        </a>
+      ))}
+    </>
+  );
 }

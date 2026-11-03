@@ -7,8 +7,11 @@ import { createNotificationForPermission } from "@/app/actions/notifications";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { AiError } from "@/lib/ai";
 import { generateQuotationDraft } from "./ai/draftQuotation";
-import { CONTRACT_REVIEW_ITEMS, PAYMENT_SCHEDULES, PERM, STAGE_PROBABILITY, TAX_PERCENT, addDays, needsApproval, salesAccess, today } from "./lib";
-import { addHistory, firstHistory, insertDraftQuotation, nextDocNo, quotationData, type QuotationInput } from "./server";
+import { generateContractDraft } from "./ai/draftContract";
+import { REMINDER_LEVELS, generateReminderLetter } from "./ai/reminderLetter";
+import { CONTRACT_REVIEW_ITEMS, PAYMENT_SCHEDULES, PERM, STAGE_PROBABILITY, TAX_PERCENT, CONTRACT_APPROVAL_BUSINESS_DAYS, addBusinessDays, addDays, computeTotals, contractBillingPeriods, lineTotal, needsApproval, salesAccess, today, type LineInput } from "./lib";
+import { buildClauses, type Clause } from "./documents/contractTemplates";
+import { addHistory, fillQuotationDefaults, firstHistory, insertDraftQuotation, nextDocNo, quotationData, type QuotationInput } from "./server";
 
 export type { QuotationInput } from "./server";
 
@@ -46,14 +49,15 @@ const termDays = (terms: string) => Number(terms.match(/\d+/)?.[0]) || 30;
 
 export async function getSalesOverview() {
   await guard();
-  const [opportunities, quotations, invoices, contracts, orders] = await Promise.all([
+  const [opportunities, quotations, invoices, contracts, orders, contractApprovals] = await Promise.all([
     prisma.opportunity.findMany({ include: { customer: { select: { name: true } } } }),
     prisma.quotation.findMany({ where: { status: "Waiting Approval" }, include: { customer: { select: { name: true } } }, orderBy: { date: "desc" } }),
     prisma.invoice.findMany({ where: { status: { in: ["Unpaid", "Partial"] } }, include: { customer: { select: { name: true } } }, orderBy: { dueDate: "asc" } }),
     prisma.contract.findMany({ where: { status: "Active" }, include: { customer: { select: { name: true } } }, orderBy: { endDate: "asc" } }),
     prisma.salesOrder.findMany({ where: { status: { notIn: ["Completed", "Cancelled"] } }, include: { customer: { select: { name: true } } }, orderBy: { orderDate: "desc" } }),
+    prisma.contract.findMany({ where: { status: "Waiting Approval" }, include: { customer: { select: { name: true } } }, orderBy: { approvalDueDate: "asc" } }),
   ]);
-  return { opportunities, waitingApproval: quotations, openInvoices: invoices, activeContracts: contracts, openOrders: orders };
+  return { opportunities, waitingApproval: quotations, contractApprovals, openInvoices: invoices, activeContracts: contracts, openOrders: orders };
 }
 
 export async function getOpportunities() {
@@ -131,12 +135,83 @@ export async function getInvoices() {
 
 export async function getInvoice(id: string) {
   await guard();
-  return prisma.invoice.findUnique({ where: { id }, include: { customer: true, salesOrder: { select: { id: true, soNo: true, customerPoNo: true } }, payments: { orderBy: { paymentDate: "asc" } } } });
+  return prisma.invoice.findUnique({ where: { id }, include: {
+    customer: true, salesOrder: { select: { id: true, soNo: true, customerPoNo: true } }, contract: { select: { id: true, contractNo: true, title: true } },
+    payments: { orderBy: { paymentDate: "asc" } }, items: { orderBy: { sortOrder: "asc" } }, reminders: { orderBy: { date: "desc" } },
+  } });
+}
+
+/** Data form "Invoice baru": customer, produk, dan kontrak yang bisa ditagih beserta periode tagihnya. */
+export async function getInvoiceFormData() {
+  await guard("finance");
+  const [customers, products, contracts] = await Promise.all([
+    prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, paymentTerms: true } }),
+    prisma.product.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }], select: { id: true, sku: true, name: true, brand: true, model: true, unit: true, price: true, category: true } }),
+    prisma.contract.findMany({
+      where: { type: { not: "Garansi" }, value: { gt: 0 }, status: { in: ["Approved", "Sent", "Active"] } },
+      include: { customer: { select: { name: true } }, invoices: { where: { status: { not: "Cancelled" } }, select: { id: true, invoiceNo: true, periodLabel: true } } },
+      orderBy: { startDate: "desc" },
+    }),
+  ]);
+  return {
+    customers, products,
+    contracts: contracts.map(c => ({
+      id: c.id, contractNo: c.contractNo, title: c.title, type: c.type, value: c.value, customer: c.customer.name,
+      periods: contractBillingPeriods(c).map(p => ({ ...p, amount: Math.round(c.value * p.percent / 100), invoice: c.invoices.find(i => i.periodLabel === p.label) ?? null })),
+    })),
+  };
 }
 
 export async function getContracts() {
   await guard();
   return prisma.contract.findMany({ include: { customer: { select: { name: true } }, salesOrder: { select: { id: true, soNo: true } } }, orderBy: { endDate: "asc" } });
+}
+
+export async function getContract(id: string) {
+  await guard();
+  const c = await prisma.contract.findUnique({
+    where: { id },
+    include: { customer: true, salesOrder: { select: { id: true, soNo: true, bastNo: true } }, invoices: { orderBy: { invoiceDate: "asc" }, select: { id: true, invoiceNo: true, periodLabel: true, total: true, paidAmount: true, status: true, dueDate: true } } },
+  });
+  if (!c) return null;
+  const [renewedFrom, renewal] = await Promise.all([
+    c.renewedFromId ? prisma.contract.findUnique({ where: { id: c.renewedFromId }, select: { id: true, contractNo: true } }) : null,
+    prisma.contract.findFirst({ where: { renewedFromId: c.id }, select: { id: true, contractNo: true, status: true } }),
+  ]);
+  return { ...c, renewedFrom, renewal };
+}
+
+/** Alat terpasang milik customer: dari SO yang sudah BAST (+ nomor seri) dan dari kontrak sebelumnya. */
+export async function getInstalledBase(customerId: string): Promise<ContractItem[]> {
+  await guard();
+  const [orders, contracts] = await Promise.all([
+    prisma.salesOrder.findMany({ where: { customerId, status: { in: ["Installed", "Completed"] } }, include: { items: true } }),
+    prisma.contract.findMany({ where: { customerId }, select: { coveredItemsJson: true } }),
+  ]);
+  const out = new Map<string, ContractItem>();
+  for (const so of orders) for (const it of so.items) {
+    if (/^(Jasa|Instalasi|Kontrak)/i.test(it.description)) continue;
+    const product = it.description.split(" — ").pop()?.trim() || it.description;
+    const serials = (it.serialNumbers || "").split(",").map(x => x.trim()).filter(Boolean);
+    const count = Math.max(1, Math.round(it.qty));
+    for (let i = 0; i < count; i++) {
+      const serialNumber = serials[i] || "-";
+      out.set(`${product}|${serialNumber}|${so.id}|${i}`, { product, serialNumber });
+    }
+  }
+  for (const c of contracts) for (const it of JSON.parse(c.coveredItemsJson || "[]") as ContractItem[]) {
+    if (![...out.values()].some(o => o.serialNumber !== "-" && o.serialNumber === it.serialNumber)) out.set(`${it.product}|${it.serialNumber}`, it);
+  }
+  return [...out.values()];
+}
+
+export async function getContractFormData() {
+  await guard();
+  const [customers, prices] = await Promise.all([
+    prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true, paymentTerms: true, contactName: true, contactTitle: true, signatoryName: true, signatoryTitle: true } }),
+    prisma.product.findMany({ where: { category: "Jasa" }, select: { sku: true, name: true, price: true } }),
+  ]);
+  return { customers, servicePrices: prices };
 }
 
 // ---------------------------------------------------------
@@ -146,6 +221,7 @@ export async function getContracts() {
 export type CustomerInput = {
   name: string; type: string; npwp?: string; address?: string; city?: string;
   contactName?: string; contactTitle?: string; contactEmail?: string; contactPhone?: string; paymentTerms: string; notes?: string;
+  signatoryName?: string; signatoryTitle?: string;
 };
 
 export async function saveCustomer(id: string | null, data: CustomerInput) {
@@ -234,7 +310,7 @@ export async function updateQuotation(id: string, data: QuotationInput) {
     const user = await guard("manage");
     const old = await prisma.quotation.findUniqueOrThrow({ where: { id } });
     if (old.status !== "Draft") throw new Error("Hanya penawaran berstatus Draft yang bisa diedit. Buat revisi untuk mengubah.");
-    const { fields, items } = quotationData(data);
+    const { fields, items } = quotationData(await fillQuotationDefaults(data));
     await prisma.$transaction([
       prisma.quotationItem.deleteMany({ where: { quotationId: id } }),
       prisma.quotation.update({ where: { id }, data: { ...fields, historyJson: addHistory(old.historyJson, user.name, "Penawaran diedit"), items: { create: items } } }),
@@ -445,6 +521,54 @@ export async function createInvoiceFromSchedule(salesOrderId: string, termIndex:
   });
 }
 
+export type ManualInvoiceInput = { customerId: string; invoiceDate: string; termLabel: string; notes?: string; items: LineInput[] };
+
+/** Invoice tanpa Sales Order: suku cadang, jasa panggilan, dll. */
+export async function createManualInvoice(data: ManualInvoiceInput) {
+  return run(async () => {
+    const user = await guard("finance");
+    const customer = await prisma.customer.findUnique({ where: { id: data.customerId } });
+    if (!customer) throw new Error("Pilih customer.");
+    const items = data.items.filter(i => i.description?.trim());
+    if (!items.length) throw new Error("Tambahkan minimal satu item.");
+    if (items.some(i => !(i.qty > 0) || !(i.unitPrice >= 0))) throw new Error("Jumlah dan harga item harus valid.");
+    if (!data.invoiceDate) throw new Error("Tanggal invoice wajib diisi.");
+    const { subtotal, taxAmount, total } = computeTotals(items);
+    const inv = await prisma.invoice.create({ data: {
+      invoiceNo: await nextDocNo("INV", data.invoiceDate), customerId: customer.id, termLabel: data.termLabel?.trim() || "Tagihan", termPercent: 100,
+      invoiceDate: data.invoiceDate, dueDate: addDays(data.invoiceDate, termDays(customer.paymentTerms)), subtotal, taxAmount, total,
+      status: "Unpaid", notes: data.notes || null, createdAt: today(), historyJson: firstHistory(user.name, "Invoice manual diterbitkan"),
+      items: { create: items.map((i, idx) => ({ productId: i.productId || null, description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, lineTotal: lineTotal(i), sortOrder: idx + 1 })) },
+    } });
+    return inv.id;
+  });
+}
+
+/** Invoice untuk satu periode tagih kontrak (sekali per periode). */
+export async function createInvoiceFromContract(contractId: string, periodIndex: number) {
+  return run(async () => {
+    const user = await guard("finance");
+    const c = await prisma.contract.findUniqueOrThrow({ where: { id: contractId }, include: { customer: true, invoices: true } });
+    if (c.type === "Garansi" || !(c.value > 0)) throw new Error("Kontrak ini tidak memiliki nilai tagihan.");
+    if (!["Approved", "Sent", "Active"].includes(c.status)) throw new Error("Kontrak harus sudah disetujui sebelum ditagih.");
+    const period = contractBillingPeriods(c)[periodIndex];
+    if (!period) throw new Error("Periode tagih tidak ditemukan.");
+    if (c.invoices.some(i => i.periodLabel === period.label && i.status !== "Cancelled")) throw new Error(`Periode "${period.label}" sudah ditagih.`);
+    const subtotal = Math.round(c.value * period.percent / 100);
+    const taxAmount = Math.round(subtotal * TAX_PERCENT / 100);
+    const invoiceDate = today();
+    const inv = await prisma.invoice.create({ data: {
+      invoiceNo: await nextDocNo("INV", invoiceDate), customerId: c.customerId, contractId: c.id, periodLabel: period.label,
+      termLabel: `Kontrak ${c.type}${period.percent < 100 ? ` - Triwulan ${periodIndex + 1}` : ""}`, termPercent: period.percent,
+      invoiceDate, dueDate: addDays(invoiceDate, termDays(c.paymentTerms || c.customer.paymentTerms)), subtotal, taxAmount, total: subtotal + taxAmount,
+      status: "Unpaid", createdAt: today(), historyJson: firstHistory(user.name, `Invoice kontrak ${c.contractNo}: ${period.label}`),
+      items: { create: [{ description: `${c.title} (${c.contractNo}), ${period.label}`, qty: 1, unit: "Periode", unitPrice: subtotal, lineTotal: subtotal, sortOrder: 1 }] },
+    } });
+    await prisma.contract.update({ where: { id: c.id }, data: { historyJson: addHistory(c.historyJson, user.name, `Ditagih: ${inv.invoiceNo} (${period.label})`) } });
+    return inv.id;
+  });
+}
+
 export async function recordPayment(formData: FormData) {
   return run(async () => {
     const user = await guard("finance");
@@ -463,7 +587,7 @@ export async function recordPayment(formData: FormData) {
     const paidAmount = inv.paidAmount + amount;
     const status = paidAmount >= inv.total - 0.5 ? "Paid" : "Partial";
     await prisma.$transaction([
-      prisma.payment.create({ data: { invoiceId, amount, paymentDate, method, reference, proofUrl, receivedBy: user.name, createdAt: today() } }),
+      prisma.payment.create({ data: { invoiceId, amount, paymentDate, method, reference, proofUrl, receivedBy: user.name, createdAt: today(), receiptNo: await nextDocNo("KWT", paymentDate) } }),
       prisma.invoice.update({ where: { id: invoiceId }, data: { paidAmount, status, historyJson: addHistory(inv.historyJson, user.name, `Pembayaran Rp ${Math.round(amount).toLocaleString("id-ID")} (${status === "Paid" ? "lunas" : "sebagian"})`) } }),
     ]);
   });
@@ -491,40 +615,141 @@ export async function cancelInvoice(id: string, reason: string) {
 // Kontrak
 // ---------------------------------------------------------
 
+export type ContractItem = { product: string; serialNumber: string; location?: string };
 export type ContractInput = {
   customerId: string; salesOrderId?: string | null; type: string; title: string; startDate: string; endDate: string;
-  value: number; visitsPerYear?: number | null; coveredItems: { product: string; serialNumber: string }[]; picName?: string; notes?: string;
+  value: number; visitsPerYear?: number | null; coveredItems: ContractItem[]; picName?: string; notes?: string;
+  scope?: string; responseTime?: string; paymentTerms?: string; billingSchedule?: string; sparePartDiscount?: number | null;
+  signatoryName?: string; signatoryTitle?: string; clauses?: Clause[];
 };
 
-export async function createContract(data: ContractInput) {
+function contractFields(data: ContractInput) {
+  if (!data.customerId || !data.title?.trim()) throw new Error("Customer dan judul kontrak wajib diisi.");
+  if (!data.startDate || !data.endDate || data.endDate <= data.startDate) throw new Error("Periode kontrak tidak valid.");
+  if (!(data.value >= 0)) throw new Error("Nilai kontrak tidak valid.");
+  const items = data.coveredItems.filter(c => c.product?.trim());
+  if (data.type !== "Garansi" && items.length === 0) throw new Error("Pilih minimal satu alat yang dicakup.");
+  const clauses = data.type === "Garansi" ? [] : (data.clauses?.length ? data.clauses : buildClauses({
+    type: data.type, startDate: data.startDate, endDate: data.endDate, visitsPerYear: data.visitsPerYear, responseTime: data.responseTime,
+    value: data.value, paymentTerms: data.paymentTerms, billingSchedule: data.billingSchedule, sparePartDiscount: data.sparePartDiscount,
+    scope: data.scope, itemCount: items.length,
+  }));
+  return {
+    customerId: data.customerId, salesOrderId: data.salesOrderId || null, type: data.type, title: data.title.trim(),
+    startDate: data.startDate, endDate: data.endDate, value: data.value, visitsPerYear: data.visitsPerYear || null,
+    coveredItemsJson: JSON.stringify(items), picName: data.picName || null, notes: data.notes || null,
+    scope: data.scope || null, responseTime: data.responseTime || null, paymentTerms: data.paymentTerms || null,
+    billingSchedule: data.billingSchedule === "Quarterly" ? "Quarterly" : "Upfront", sparePartDiscount: data.sparePartDiscount || null,
+    signatoryName: data.signatoryName || null, signatoryTitle: data.signatoryTitle || null, clausesJson: JSON.stringify(clauses),
+  };
+}
+
+/** Kontrak baru: Garansi langsung Active; AMC/Kalibrasi/Service mulai sebagai Draft dan butuh approval. */
+export async function createContract(data: ContractInput, aiNote?: string) {
   return run(async () => {
     const user = await guard("manage");
-    if (!data.customerId || !data.title?.trim()) throw new Error("Customer dan judul kontrak wajib diisi.");
-    if (!data.startDate || !data.endDate || data.endDate <= data.startDate) throw new Error("Periode kontrak tidak valid.");
-    const { coveredItems, ...rest } = data;
+    const fields = contractFields(data);
     const created = await prisma.contract.create({ data: {
-      ...rest, salesOrderId: data.salesOrderId || null, contractNo: await nextDocNo("CTR", data.startDate), status: "Active",
-      coveredItemsJson: JSON.stringify(coveredItems.filter(c => c.product.trim())), createdAt: today(), historyJson: firstHistory(user.name, "Kontrak dibuat"),
+      ...fields, contractNo: await nextDocNo("CTR", data.startDate), status: data.type === "Garansi" ? "Active" : "Draft", createdAt: today(),
+      historyJson: firstHistory(user.name, aiNote ? `Kontrak dibuat dari draft AI (${aiNote})` : "Kontrak dibuat"),
     } });
     return created.id;
   });
 }
 
-/** Perpanjang: buat kontrak baru untuk periode berikutnya, kontrak lama ditandai Renewed. */
-export async function renewContract(id: string, data: { startDate: string; endDate: string; value: number }) {
+export async function updateContract(id: string, data: ContractInput) {
+  return run(async () => {
+    const user = await guard("manage");
+    const old = await prisma.contract.findUniqueOrThrow({ where: { id } });
+    if (old.status !== "Draft") throw new Error("Hanya kontrak berstatus Draft yang bisa diedit.");
+    await prisma.contract.update({ where: { id }, data: { ...contractFields(data), historyJson: addHistory(old.historyJson, user.name, "Kontrak diedit") } });
+    return id;
+  });
+}
+
+/** Draft → Waiting Approval, dengan batas keputusan 7 hari kerja. */
+export async function submitContract(id: string) {
+  return run(async () => {
+    const user = await guard("manage");
+    const c = await prisma.contract.findUniqueOrThrow({ where: { id }, include: { customer: { select: { name: true } } } });
+    if (c.status !== "Draft") throw new Error("Kontrak ini sudah diajukan.");
+    const due = addBusinessDays(today(), CONTRACT_APPROVAL_BUSINESS_DAYS);
+    await prisma.contract.update({ where: { id }, data: { status: "Waiting Approval", approvalDueDate: due, historyJson: addHistory(c.historyJson, user.name, `Diajukan untuk persetujuan (batas ${due})`) } });
+    await createNotificationForPermission(PERM.approve, `Kontrak ${c.contractNo} (${c.customer.name}) menunggu persetujuan, batas ${due}`, `/modules/sales/contracts/${id}`);
+  });
+}
+
+export async function decideContract(id: string, decision: "approve" | "reject", note?: string) {
+  return run(async () => {
+    const user = await guard("approve");
+    const c = await prisma.contract.findUniqueOrThrow({ where: { id } });
+    if (c.status !== "Waiting Approval") throw new Error("Kontrak ini tidak sedang menunggu persetujuan.");
+    if (decision === "approve") {
+      const late = c.approvalDueDate && today() > c.approvalDueDate ? ` (melewati batas ${c.approvalDueDate})` : "";
+      await prisma.contract.update({ where: { id }, data: { status: "Approved", approvedBy: user.name, approvedAt: today(), historyJson: addHistory(c.historyJson, user.name, `Disetujui${late}${note ? `: ${note}` : ""}`) } });
+    } else {
+      if (!note?.trim()) throw new Error("Tulis alasan penolakan.");
+      await prisma.contract.update({ where: { id }, data: { status: "Draft", approvalDueDate: null, historyJson: addHistory(c.historyJson, user.name, `Dikembalikan ke Draft: ${note}`) } });
+    }
+  });
+}
+
+export async function markContractSent(id: string) {
   return run(async () => {
     const user = await guard("manage");
     const c = await prisma.contract.findUniqueOrThrow({ where: { id } });
-    if (["Renewed", "Terminated"].includes(c.status)) throw new Error("Kontrak ini sudah diperpanjang/dihentikan.");
-    if (!data.startDate || !data.endDate || data.endDate <= data.startDate) throw new Error("Periode kontrak tidak valid.");
+    if (c.status !== "Approved") throw new Error("Hanya kontrak yang sudah disetujui yang bisa dikirim.");
+    await prisma.contract.update({ where: { id }, data: { status: "Sent", historyJson: addHistory(c.historyJson, user.name, "Dokumen perjanjian dikirim ke customer") } });
+  });
+}
+
+/** Upload scan perjanjian yang sudah ditandatangani dua pihak + meterai → kontrak Active. */
+export async function uploadSignedContract(formData: FormData) {
+  return run(async () => {
+    const user = await guard("manage");
+    const id = String(formData.get("contractId"));
+    const file = formData.get("file") as File | null;
+    if (!file || file.size === 0) throw new Error("Pilih file scan perjanjian yang sudah ditandatangani.");
+    const c = await prisma.contract.findUniqueOrThrow({ where: { id } });
+    if (!["Approved", "Sent"].includes(c.status)) throw new Error("Kontrak harus disetujui sebelum diaktifkan.");
+    const url = await uploadToStorage("sales/contracts", file);
+    await prisma.contract.update({ where: { id }, data: { status: "Active", signedFileUrl: url, historyJson: addHistory(c.historyJson, user.name, "Scan bertanda tangan diunggah, kontrak aktif") } });
+    // Perpanjangan aktif → kontrak sebelumnya selesai.
+    if (c.renewedFromId) {
+      const prev = await prisma.contract.findUnique({ where: { id: c.renewedFromId } });
+      if (prev && !["Renewed", "Terminated"].includes(prev.status)) {
+        await prisma.contract.update({ where: { id: prev.id }, data: { status: "Renewed", historyJson: addHistory(prev.historyJson, user.name, `Diperpanjang oleh ${c.contractNo}`) } });
+      }
+    }
+  });
+}
+
+/** Perpanjang: salin alat & syarat ke Draft periode berikutnya (Garansi → AMC). Kontrak lama ditutup saat perpanjangan aktif. */
+export async function renewContract(id: string) {
+  return run(async () => {
+    const user = await guard("manage");
+    const c = await prisma.contract.findUniqueOrThrow({ where: { id } });
+    if (["Renewed", "Terminated", "Draft", "Waiting Approval"].includes(c.status)) throw new Error("Kontrak ini tidak bisa diperpanjang.");
+    const existing = await prisma.contract.findFirst({ where: { renewedFromId: id, status: { notIn: ["Terminated"] } } });
+    if (existing) return existing.id;
+    const startDate = c.endDate < today() ? today() : addDays(c.endDate, 1);
+    const endDate = addDays(startDate, 364);
+    const type = c.type === "Garansi" ? "AMC" : c.type;
+    const items = JSON.parse(c.coveredItemsJson || "[]") as ContractItem[];
+    const amc = await prisma.product.findFirst({ where: { sku: { endsWith: "SRV-002" } } });
+    const value = c.value || (type === "AMC" ? (amc?.price ?? 0) * items.length : 0);
+    const draft: ContractInput = {
+      customerId: c.customerId, salesOrderId: c.salesOrderId, type, title: c.type === "Garansi" ? c.title.replace(/^Garansi/, "Kontrak Perawatan") : c.title,
+      startDate, endDate, value, visitsPerYear: c.visitsPerYear ?? 2, coveredItems: items, picName: c.picName ?? undefined,
+      scope: c.scope ?? undefined, responseTime: c.responseTime ?? "2x24 jam hari kerja", paymentTerms: c.paymentTerms ?? undefined,
+      billingSchedule: c.billingSchedule, sparePartDiscount: c.sparePartDiscount ?? (type === "AMC" ? 15 : null),
+      signatoryName: c.signatoryName ?? undefined, signatoryTitle: c.signatoryTitle ?? undefined,
+    };
     const created = await prisma.contract.create({ data: {
-      contractNo: await nextDocNo("CTR", data.startDate), customerId: c.customerId, salesOrderId: c.salesOrderId,
-      type: c.type === "Garansi" ? "AMC" : c.type, title: c.type === "Garansi" ? c.title.replace(/^Garansi/, "Kontrak Perawatan") : c.title,
-      startDate: data.startDate, endDate: data.endDate, value: data.value, visitsPerYear: c.visitsPerYear ?? (c.type === "Garansi" ? 2 : null),
-      coveredItemsJson: c.coveredItemsJson, status: "Active", picName: c.picName, createdAt: today(),
-      historyJson: firstHistory(user.name, `Perpanjangan dari ${c.contractNo}`),
+      ...contractFields(draft), contractNo: await nextDocNo("CTR", startDate), status: "Draft", renewedFromId: c.id, createdAt: today(),
+      historyJson: firstHistory(user.name, `Draft perpanjangan dari ${c.contractNo}`),
     } });
-    await prisma.contract.update({ where: { id }, data: { status: "Renewed", historyJson: addHistory(c.historyJson, user.name, `Diperpanjang → ${created.contractNo}`) } });
+    await prisma.contract.update({ where: { id }, data: { historyJson: addHistory(c.historyJson, user.name, `Draft perpanjangan dibuat: ${created.contractNo}`) } });
     return created.id;
   });
 }
@@ -551,4 +776,32 @@ export async function aiDraftQuotation(input: { customerId: string; request: str
     const message = err instanceof AiError || err instanceof Error ? err.message : "Gagal membuat draft dengan AI.";
     return { success: false as const, message };
   }
+}
+
+export async function aiDraftContract(input: { customerId: string; type: string; request: string }) {
+  try {
+    await guard("manage");
+    if (!input.customerId) throw new Error("Pilih customer dulu.");
+    const installedBase = await getInstalledBase(input.customerId);
+    const result = await generateContractDraft({ ...input, installedBase });
+    return { success: true as const, ...result };
+  } catch (err) {
+    return { success: false as const, message: err instanceof Error ? err.message : "Gagal membuat draft kontrak dengan AI." };
+  }
+}
+
+/** Susun surat pengingat pembayaran (AI) untuk invoice yang lewat jatuh tempo, simpan, lalu bisa dicetak. */
+export async function createPaymentReminder(invoiceId: string) {
+  return run(async () => {
+    const user = await guard("finance");
+    const letter = await generateReminderLetter(invoiceId);
+    const inv = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
+    const date = today();
+    const created = await prisma.paymentReminder.create({ data: {
+      letterNo: await nextDocNo("SPP", date), invoiceId, level: letter.level, date, subject: letter.subject, body: letter.body,
+      createdBy: user.name, createdAt: new Date().toISOString(),
+    } });
+    await prisma.invoice.update({ where: { id: invoiceId }, data: { historyJson: addHistory(inv.historyJson, user.name, `${REMINDER_LEVELS[letter.level]} pembayaran ${created.letterNo} (disusun AI)`) } });
+    return created.id;
+  });
 }

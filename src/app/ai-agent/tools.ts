@@ -9,6 +9,8 @@ import { prisma } from "@/lib/prisma";
 import { generateQuotationDraft } from "@/app/modules/sales/ai/draftQuotation";
 import { insertDraftQuotation } from "@/app/modules/sales/server";
 import { needsApproval } from "@/app/modules/sales/lib";
+import { generateContractDraft } from "@/app/modules/sales/ai/draftContract";
+import { createContract, getInstalledBase } from "@/app/modules/sales/actions";
 
 /** Event yang dikirim ke browser selain teks jawaban. */
 export type AgentEvent =
@@ -119,6 +121,22 @@ export const AGENT_TOOLS: AiTool[] = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "draft_contract",
+      description: "Buat DRAFT kontrak layanan (AMC / Kalibrasi / Service) untuk satu customer dari alat yang terpasang di customer tersebut. Nilai dihitung dari harga master, pasal hukum baku tidak diubah. Draft dibuka di layar user dan wajib diajukan untuk approval.",
+      parameters: {
+        type: "object",
+        properties: {
+          customer: { type: "string", description: "Nama atau nomor customer" },
+          type: { type: "string", enum: ["AMC", "Kalibrasi", "Service"] },
+          request: { type: "string", description: "Kebutuhan dari user: alat, durasi, jumlah kunjungan, waktu respon, jadwal tagih, dll." },
+        },
+        required: ["customer", "type", "request"],
+      },
+    },
+  },
 ];
 
 /** Label status singkat yang ditampilkan di chat saat tool berjalan. */
@@ -133,6 +151,7 @@ export function toolStatus(name: string, args: Record<string, any>): string {
     case "download_file": return `Menyiapkan file ${args.ref ?? ""}…`;
     case "export_records": return `Menyiapkan export ${label}…`;
     case "draft_quotation": return `Menyusun draft penawaran untuk ${args.customer ?? "customer"}…`;
+    case "draft_contract": return `Menyusun draft kontrak ${args.type ?? ""} untuk ${args.customer ?? "customer"}…`;
     default: return "Memproses…";
   }
 }
@@ -231,6 +250,30 @@ export async function runTool(name: string, args: Record<string, any>, ctx: Tool
         needsManagerApproval: needsApproval(result.draft.discountPercent, result.draft.items),
         explanation: result.explanation, notInCatalog: result.unmatched,
         note: "Draft sudah dibuka. Minta user mengecek isi lalu klik Ajukan. Jangan sebut harga satuan selain total.",
+      };
+    }
+
+    case "draft_contract": {
+      if (!ctx.canAccess("sales_manage")) return { error: "User tidak punya hak membuat kontrak (butuh izin sales_manage)." };
+      const q = String(args.customer ?? "").trim();
+      if (!q) return { error: "Sebutkan customer-nya." };
+      const matches = await prisma.customer.findMany({
+        where: { OR: [{ customerNo: { equals: q, mode: "insensitive" } }, { name: { contains: q, mode: "insensitive" } }] },
+        select: { id: true, customerNo: true, name: true }, take: 5,
+      });
+      if (matches.length === 0) return { found: false, note: `Customer "${q}" tidak ditemukan.` };
+      if (matches.length > 1) return { found: false, candidates: matches.map(c => `${c.customerNo} ${c.name}`) };
+      const installedBase = await getInstalledBase(matches[0].id);
+      const result = await generateContractDraft({ customerId: matches[0].id, type: String(args.type ?? "AMC"), request: String(args.request ?? ""), installedBase, deadline: Date.now() + 35_000 });
+      const saved = await createContract(result.draft, `AI Assistant, acuan: ${result.references.join(", ") || "pasal baku"}`);
+      if (!saved.success || !saved.id) return { error: saved.success ? "Gagal menyimpan draft." : saved.message };
+      const created = await prisma.contract.findUniqueOrThrow({ where: { id: saved.id }, select: { contractNo: true } });
+      ctx.emit({ t: "navigate", path: `/modules/sales/contracts/${saved.id}`, label: created.contractNo });
+      return {
+        created: created.contractNo, status: "Draft", customer: matches[0].name, type: result.draft.type, value: result.draft.value,
+        period: `${result.draft.startDate} s/d ${result.draft.endDate}`, items: result.draft.coveredItems.map(i => `${i.product} (S/N ${i.serialNumber})`),
+        explanation: result.explanation,
+        note: "Draft sudah dibuka. Minta user mengecek isi & pasal, lalu klik Ajukan persetujuan (batas approval 7 hari kerja).",
       };
     }
 
