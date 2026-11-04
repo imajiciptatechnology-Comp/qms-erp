@@ -7,6 +7,8 @@ import { DRIVER_DOC_TYPES, daysLeftText, driverFlags, expiryState } from "../../
 import { Card, InfoRow } from "../../../ui";
 import { DocTable, Tabs } from "../../DocTable";
 import { AddDocumentForm } from "../../DocumentForms";
+import { isTelegramConfigured } from "@/lib/telegram";
+import TelegramConnect from "../../../bot/TelegramConnect";
 
 export default async function DriverDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
   const { access } = await getLogisticsAccess();
@@ -18,6 +20,7 @@ export default async function DriverDetail({ params, searchParams }: { params: P
     prisma.truckType.findMany({ orderBy: { sortOrder: "asc" } }),
   ]);
   if (!d) notFound();
+  const link = await prisma.chatChannelLink.findFirst({ where: { driverId: d.id, active: true, chatId: { not: null } }, orderBy: { linkedAt: "desc" } });
   const flags = driverFlags(d);
   const base = `/modules/logistics/fleet/drivers/${d.id}`;
   const drafts = d.documents.filter(x => x.status === "Draft").length;
@@ -51,6 +54,10 @@ export default async function DriverDetail({ params, searchParams }: { params: P
               </span>
             </InfoRow>
             {d.notes && <InfoRow label="Catatan">{d.notes}</InfoRow>}
+          </Card>
+          <Card title="Telegram bot">
+            <TelegramConnect driverId={d.id} driverName={d.name} configured={isTelegramConfigured()} canManage={access.canFleet}
+              linked={link?.linkedAt ? { chatName: link.chatName, chatUsername: link.chatUsername, linkedAt: link.linkedAt } : null} />
           </Card>
         </div>
       )}

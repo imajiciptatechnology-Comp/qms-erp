@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ClipboardCheck, IdCard, MapPin, Truck, Wallet } from "lucide-react";
+import { IdCard, Send, Truck } from "lucide-react";
+import { getBotUsername, isTelegramConfigured } from "@/lib/telegram";
 import { prisma } from "@/lib/prisma";
 import { getLogisticsAccess } from "@/app/modules/logistics/server";
 import { driverFlags } from "@/app/modules/logistics/lib";
 
-/** Halaman sopir (dibuka dari HP). Tahap 1: profil & kualifikasi; tugas/P2H/ePOD menyusul di Tahap 4. */
+/** Halaman sopir: profil & kualifikasi. Tugas sehari-hari lewat bot Telegram (rancangan 10.3). */
 export default async function DriverHome({ searchParams }: { searchParams: Promise<{ driver?: string }> }) {
   const { user, access } = await getLogisticsAccess();
   if (!user) redirect("/login");
@@ -24,6 +25,7 @@ export default async function DriverHome({ searchParams }: { searchParams: Promi
     ? await prisma.driver.findUnique({ where: { userEmail: user.email }, include: { qualifications: { include: { truckType: true } } } })
     : await prisma.driver.findFirst({ where: pick ? { id: pick } : { userEmail: { not: null } }, include: { qualifications: { include: { truckType: true } } } });
 
+  const botUsername = isTelegramConfigured() ? await getBotUsername().catch(() => null) : null;
   return (
     <div className="max-w-md mx-auto space-y-4">
       {!access.isDriver && (
@@ -59,15 +61,10 @@ export default async function DriverHome({ searchParams }: { searchParams: Promi
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <p className="font-semibold text-slate-800">Tugas hari ini</p>
-            <p className="text-sm text-slate-500 mt-1">Belum ada trip yang di-assign ke Anda.</p>
-            <ul className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
-              <li className="border border-dashed border-slate-200 rounded-xl p-3"><ClipboardCheck className="w-5 h-5 mx-auto mb-1" />P2H</li>
-              <li className="border border-dashed border-slate-200 rounded-xl p-3"><MapPin className="w-5 h-5 mx-auto mb-1" />Status trip</li>
-              <li className="border border-dashed border-slate-200 rounded-xl p-3"><Wallet className="w-5 h-5 mx-auto mb-1" />Uang jalan</li>
-            </ul>
-            <p className="text-[11px] text-slate-400 mt-3">P2H dengan suara, status trip, foto muatan, ePOD, dan saldo uang jalan tersedia di tahap berikutnya.</p>
+          <div className="bg-white border border-slate-200 rounded-2xl p-5 space-y-2">
+            <p className="font-semibold text-slate-800 flex items-center gap-2"><Send className="w-4 h-4 text-sky-600" /> Tugas, P2H & status trip lewat Telegram</p>
+            <p className="text-sm text-slate-600">Sopir tidak perlu login ke ERP. Semua tugas (lihat trip, P2H dengan suara, tombol status, lokasi live, foto muatan/nota/surat jalan) dijalankan lewat bot Telegram perusahaan.</p>
+            <p className="text-sm text-slate-600">{botUsername ? <>Buka <a className="text-blue-700 underline" href={`https://t.me/${botUsername}`}>@{botUsername}</a>. Belum terhubung? Minta link undangan ke Fleet Manager.</> : "Bot Telegram belum aktif. Hubungi Fleet Manager."}</p>
           </div>
         </>
       )}

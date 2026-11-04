@@ -12,7 +12,7 @@
 export type AiContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } }
-  | { type: "input_audio"; input_audio: { data: string; format: "wav" | "mp3" } };
+  | { type: "input_audio"; input_audio: { data: string; format: "wav" | "mp3" | "ogg" } };
 
 export type AiToolCall = {
   id: string;
@@ -189,5 +189,41 @@ export function parseAiJson<T>(text: string): T {
     const end = cleaned.lastIndexOf("}");
     if (start !== -1 && end > start) return JSON.parse(cleaned.slice(start, end + 1)) as T;
     throw new AiError("Format jawaban AI tidak valid.");
+  }
+}
+
+/**
+ * Transkripsi voice note (mis. OGG/Opus dari Telegram). Dicoba dulu lewat endpoint OpenAI-compatible
+ * (format "ogg"); kalau ditolak (400) dan provider-nya Gemini, pakai API Gemini native (inline_data audio/ogg).
+ */
+export async function aiTranscribeAudio(base64: string, mime = "audio/ogg", opts: { deadline?: number } = {}): Promise<{ text: string; model: string; via: string }> {
+  const prompt = "Transkripsikan rekaman suara berbahasa Indonesia ini apa adanya (boleh campur istilah truk/logistik). Jawab hanya dengan teks transkripsinya. Kalau tidak ada ucapan, jawab kosong.";
+  const format = mime.includes("ogg") ? "ogg" : mime.includes("mpeg") || mime.includes("mp3") ? "mp3" : "wav";
+  try {
+    const { text, model } = await aiComplete(
+      [{ role: "user", content: [{ type: "text", text: prompt }, { type: "input_audio", input_audio: { data: base64, format } }] }],
+      { maxTokens: 800, temperature: 0, deadline: opts.deadline },
+    );
+    return { text: text.trim(), model, via: "openai-compatible" };
+  } catch (err) {
+    const config = getConfig();
+    const isGemini = config.baseUrl.includes("generativelanguage.googleapis.com");
+    if (!(err instanceof AiError && err.status === 400 && isGemini)) throw err;
+    const root = config.baseUrl.replace(/\/openai$/, "");
+    for (const model of config.models) {
+      const res = await fetch(`${root}/models/${model}:generateContent`, {
+        method: "POST",
+        headers: { "x-goog-api-key": config.apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: base64 } }] }], generationConfig: { temperature: 0, maxOutputTokens: 800 } }),
+        signal: AbortSignal.timeout(Math.max(5_000, (opts.deadline ?? Date.now() + 40_000) - Date.now())),
+      }).catch(() => null);
+      if (!res) continue;
+      if (res.status === 429 || res.status >= 500) continue;
+      if (!res.ok) throw new AiError(`Transkripsi gagal (${res.status}): ${(await res.text()).slice(0, 200)}`, res.status);
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? "").join("").trim();
+      return { text, model, via: "gemini-native" };
+    }
+    throw new AiError("Model AI sedang sibuk. Coba lagi beberapa saat lagi.");
   }
 }

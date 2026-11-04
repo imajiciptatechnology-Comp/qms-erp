@@ -170,7 +170,14 @@ export async function maybeRunFleetReminders(onDriverReminder?: Parameters<typeo
   if (Date.now() - last < 60 * 60 * 1000) return;
   await setJson(key, Date.now());
   try {
-    await runFleetReminders(onDriverReminder);
+    // Default: pengingat SIM dikirim ke sopirnya sendiri lewat bot Telegram (bila terhubung).
+    const toDriver = onDriverReminder ?? (async (item: ExpiringItem, text: string) => {
+      const { isTelegramConfigured } = await import("@/lib/telegram");
+      if (!isTelegramConfigured() || !item.driverId) return;
+      const { sendToDriver } = await import("./bot/telegramBot");
+      await sendToDriver(item.driverId, `⏰ Pengingat: ${text} Segera urus perpanjangan dan kirim foto dokumen barunya di chat ini.`);
+    });
+    await runFleetReminders(toDriver);
   } catch (err) {
     console.error("[fleet reminders]", err);
   }

@@ -296,7 +296,8 @@ function toUnit(trip: LoadedTrip, now: number): DeployedUnit {
   const scale = tripScale(trip);
   const fmt = (ms: number | null) => (ms == null || !Number.isFinite(ms) ? null : new Date(ms).toISOString());
   const st = TRIP_STATUSES[trip.status] ?? { label: trip.status };
-  const lastEvent = trip.events[trip.events.length - 1];
+  // Event status saja (bukan P2H/foto/laporan sopir) untuk "sejak" dan deteksi diam.
+  const lastEvent = [...trip.events].reverse().find(e => TRIP_STATUSES[e.status]);
   const stopsTotal = trip.order?.stops.length ?? plan.phases.filter(p => p.status === "Unloading").length;
   const arrived = trip.stopsDone > 0 || ["Unloading", "Returning"].includes(trip.status);
 
