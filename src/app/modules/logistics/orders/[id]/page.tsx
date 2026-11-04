@@ -47,6 +47,12 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
               <InfoRow label="Muatan">{o.cargoDesc}{o.cargoWeightTon ? ` · ${o.cargoWeightTon} ton` : ""}{o.cargoVolumeM3 ? ` · ${o.cargoVolumeM3} m³` : ""}{o.cargoValue ? ` · nilai ${rupiah(o.cargoValue)}` : ""}</InfoRow>
               <InfoRow label="Layanan">{[o.tkbm && "TKBM", o.escort && "Pengawalan", o.insurance && "Asuransi muatan", o.returnLoad && "Muatan balik", o.overnightDays > 0 && `Menginap ${o.overnightDays} hari`].filter(Boolean).join(", ") || "—"}</InfoRow>
               <InfoRow label="Catatan">{o.notes}</InfoRow>
+              {o.status !== "Cancelled" && (
+                <InfoRow label="Link tracking klien">
+                  <a href={`/track/${o.trackingToken}`} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline break-all">/track/{o.trackingToken}</a>
+                  <span className="block text-xs text-slate-500">Halaman publik tanpa login — kirim ke klien (salin alamat lengkap dari tab yang terbuka).</span>
+                </InfoRow>
+              )}
             </dl>
           </Card>
           <Card title={`Titik bongkar (${o.stops.length})`}>

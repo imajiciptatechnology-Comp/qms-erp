@@ -12,7 +12,11 @@ export default function AppLayout({ children, user, rolesConfig }: { children: R
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Halaman publik tanpa login (link tracking untuk klien logistik).
+  const isPublic = pathname.startsWith("/track/");
+
   useEffect(() => {
+    if (isPublic) return;
     if (!user && pathname !== "/login") {
       // Token bisa saja valid tapi user-nya sudah tidak ada di database.
       // Hapus cookie dulu, kalau tidak middleware melempar /login balik ke / (loop, layar putih).
@@ -22,13 +26,14 @@ export default function AppLayout({ children, user, rolesConfig }: { children: R
     } else if (user && pathname === "/login") {
       router.push("/");
     }
-  }, [user, pathname, router]);
+  }, [user, pathname, router, isPublic]);
 
   // Close sidebar on route change (mobile nav)
   useEffect(() => {
     setSidebarOpen(false);
   }, [pathname]);
 
+  if (isPublic) return <>{children}</>;
   if (!user && pathname !== "/login") return null;
   if (user && pathname === "/login") return null;
 

@@ -28,7 +28,7 @@ import {
   ClipboardPlus,
   Tags,
   Users,
-  Smartphone,
+  MapPinned,
   CalendarClock,
   X
 } from "lucide-react";
@@ -67,7 +67,7 @@ export const LOGISTICS_MENU = [
   { id: "log-fleet", name: "Fleet & Crew", path: "/modules/logistics/fleet", icon: Truck, perm: "logistics" },
   { id: "log-expiring", name: "Expiring Documents", path: "/modules/logistics/fleet/expiring", icon: CalendarClock, perm: "logistics" },
   { id: "log-clients", name: "Clients", path: "/modules/logistics/clients", icon: Users, perm: "logistics" },
-  { id: "log-driver", name: "Driver App", path: "/driver", icon: Smartphone, perm: "logistics_driver" },
+  { id: "log-tracking", name: "Fleet Tracking", path: "/modules/logistics/tracking", icon: MapPinned, perm: "logistics" },
 ];
 
 export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClose }: {

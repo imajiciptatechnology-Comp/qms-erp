@@ -865,6 +865,7 @@ model LogisticsRoute {
   sortOrder     Int            @default(0)
   rates         CharterRate[]
   orders        CharterOrder[]
+  trips         Trip[]
 }
 
 /// Tarif charter sekali jalan per rute × jenis truk (all-in BBM + tol + sopir, belum PPN).
@@ -917,6 +918,7 @@ model LogisticsClient {
   createdAt               String
   locations               LogisticsLocation[]
   orders                  CharterOrder[]
+  trips                   Trip[]
 }
 
 model LogisticsLocation {
@@ -932,26 +934,27 @@ model LogisticsLocation {
 }
 
 model Vehicle {
-  id                String    @id @default(cuid())
-  plateNo           String    @unique
+  id                String                 @id @default(cuid())
+  plateNo           String                 @unique
   truckTypeId       String
   brand             String?
   year              Int?
-  status            String    @default("Ready") // Ready | In Repair | Inactive
-  odometerKm        Float     @default(0)
+  status            String                 @default("Ready") // Ready | In Repair | Inactive
+  odometerKm        Float                  @default(0)
   stnkExpiry        String?
   kirExpiry         String?
   insuranceExpiry   String?
   pkbExpiry         String? // jatuh tempo pajak tahunan (PKB)
   nextServiceDate   String?
   nextServiceKm     Float?
-  tollMethod        String    @default("A") // A kartu e-toll perusahaan | B tunai | C kartu pribadi sopir
+  tollMethod        String                 @default("A") // A kartu e-toll perusahaan | B tunai | C kartu pribadi sopir
   tollCardNo        String?
   preferredDriverId String?
   notes             String?
   truckType         TruckType              @relation(fields: [truckTypeId], references: [id])
   documents         VehicleDocument[]
   services          VehicleServiceRecord[]
+  trips             Trip[]
 }
 
 model Driver {
@@ -970,6 +973,7 @@ model Driver {
   notes             String?
   qualifications    DriverQualification[]
   documents         DriverDocument[]
+  trips             Trip[]
 }
 
 /// Jenis kendaraan yang boleh dibawa sopir. basis: auto (SIM + training + pengalaman) | manual-add | manual-revoke.
@@ -995,6 +999,7 @@ model Helper {
   preferredDriverId String?
   status            String  @default("Active")
   notes             String?
+  trips             Trip[]
 }
 
 model CharterOrder {
@@ -1038,6 +1043,7 @@ model CharterOrder {
   route           LogisticsRoute     @relation(fields: [routeId], references: [id])
   truckType       TruckType          @relation(fields: [truckTypeId], references: [id])
   stops           CharterOrderStop[]
+  trips           Trip[]
 }
 
 /// Titik bongkar (urut). Titik ke-2 dst. = multi-drop.
@@ -1060,26 +1066,26 @@ model CharterOrderStop {
 
 /// docType: STNK | PKB | KIR | INSURANCE. status: Draft | Verified | Rejected.
 model VehicleDocument {
-  id          String  @id @default(cuid())
-  vehicleId   String
-  docType     String
-  docNo       String?
-  holderName  String? // nama pemilik (STNK) / perusahaan asuransi
-  validFrom   String?
-  validUntil  String?
-  amount      Float? // nominal pajak / premi
-  paidDate    String? // tanggal bayar pajak
-  fileUrl     String?
-  fileName    String?
-  aiJson      String? // hasil scan AI mentah (untuk jejak)
-  source      String  @default("Manual") // Manual | Scan AI | Telegram | Demo Data
-  status      String  @default("Verified")
-  notes       String?
-  createdBy   String
-  createdAt   String
-  verifiedBy  String?
-  verifiedAt  String?
-  vehicle     Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  id         String  @id @default(cuid())
+  vehicleId  String
+  docType    String
+  docNo      String?
+  holderName String? // nama pemilik (STNK) / perusahaan asuransi
+  validFrom  String?
+  validUntil String?
+  amount     Float? // nominal pajak / premi
+  paidDate   String? // tanggal bayar pajak
+  fileUrl    String?
+  fileName   String?
+  aiJson     String? // hasil scan AI mentah (untuk jejak)
+  source     String  @default("Manual") // Manual | Scan AI | Telegram | Demo Data
+  status     String  @default("Verified")
+  notes      String?
+  createdBy  String
+  createdAt  String
+  verifiedBy String?
+  verifiedAt String?
+  vehicle    Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
   @@index([vehicleId, docType])
 }
@@ -1130,4 +1136,87 @@ model VehicleServiceRecord {
   vehicle         Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
 
   @@index([vehicleId, serviceDate])
+}
+
+// ---------------------------------------------------------
+// LOGISTIK — trip minimal untuk Fleet Tracking (rancangan 10.2) & bot Telegram (10.3).
+// Papan dispatch, blokir, dan override lengkap menyusul di Tahap 2 memakai tabel yang sama.
+// ---------------------------------------------------------
+
+/// status: Scheduled | ToLoad | Loading | InTransit | Unloading | Returning | Completed | Cancelled.
+/// Trip simulasi (isSimulated) bergerak sendiri mengikuti planJson; trip nyata diisi dari bot Telegram.
+model Trip {
+  id              String           @id @default(cuid())
+  tripNo          String           @unique
+  orderId         String?
+  routeId         String?
+  clientId        String?
+  vehicleId       String
+  driverId        String
+  helperId        String?
+  status          String           @default("Scheduled")
+  plannedStart    String // ISO datetime
+  promisedArrival String? // janji tiba di titik bongkar pertama (ISO)
+  startedAt       String?
+  completedAt     String?
+  p2hDoneAt       String?
+  stopsDone       Int              @default(0)
+  planJson        String           @default("[]") // fase + jalur [[lat,lng]] untuk peta/simulasi/ETA
+  isSimulated     Boolean          @default(false)
+  simScenario     String? // normal | late | stalled | silent | noP2H
+  simStartedAt    String?
+  simSpeed        Float            @default(1) // menit simulasi per menit nyata
+  simOffsetMin    Float            @default(0)
+  lastLat         Float?
+  lastLng         Float?
+  lastPingAt      String?
+  lastSpeedKmh    Float?
+  notes           String?
+  createdBy       String
+  createdAt       String
+  order           CharterOrder?    @relation(fields: [orderId], references: [id])
+  route           LogisticsRoute?  @relation(fields: [routeId], references: [id])
+  client          LogisticsClient? @relation(fields: [clientId], references: [id])
+  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id])
+  driver          Driver           @relation(fields: [driverId], references: [id])
+  helper          Helper?          @relation(fields: [helperId], references: [id])
+  events          TripEvent[]
+  pings           LocationPing[]
+
+  @@index([status])
+}
+
+/// Timeline trip. source: Simulasi | Telegram | Kantor.
+model TripEvent {
+  id     String  @id @default(cuid())
+  tripId String
+  status String
+  label  String
+  at     String
+  lat    Float?
+  lng    Float?
+  note   String?
+  source String  @default("Kantor")
+  by     String?
+  trip   Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, at])
+}
+
+/// Posisi truk (simulasi atau lokasi live Telegram).
+model LocationPing {
+  id        String  @id @default(cuid())
+  tripId    String?
+  vehicleId String?
+  driverId  String?
+  lat       Float
+  lng       Float
+  speedKmh  Float?
+  heading   Float?
+  at        String
+  source    String  @default("Simulasi")
+  trip      Trip?   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, at])
+  @@index([driverId, at])
 }

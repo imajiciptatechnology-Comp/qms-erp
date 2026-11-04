@@ -9,6 +9,9 @@ import { driverFlags } from "@/app/modules/logistics/lib";
 export default async function DriverHome({ searchParams }: { searchParams: Promise<{ driver?: string }> }) {
   const { user, access } = await getLogisticsAccess();
   if (!user) redirect("/login");
+  // "Driver App" diganti Fleet Tracking (rancangan 10.2): orang kantor diarahkan ke dashboard pantau armada.
+  const { driver: pickParam } = await searchParams;
+  if (!access.isDriver && !pickParam) redirect("/modules/logistics/tracking");
   const allowed = access.isDriver || access.isSuperAdmin || access.canView;
   if (!allowed) {
     return <p className="text-sm text-slate-500">Halaman ini khusus sopir.</p>;

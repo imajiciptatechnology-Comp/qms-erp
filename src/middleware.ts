@@ -46,7 +46,9 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      * - uploads (uploaded files)
+     * - track/ (public shipment tracking link)
      */
-    '/((?!api|_next/static|_next/image|favicon.ico|uploads).*)',
+    // track/ = link tracking publik untuk klien logistik (token acak per order, tanpa login)
+    '/((?!api|_next/static|_next/image|favicon.ico|uploads|track/).*)',
   ],
 };
