@@ -116,11 +116,17 @@ Jawab HANYA JSON:
   if (!loadTime) uncertain.add("loadTime");
 
   const clientLocs = client ? locations.filter(l => l.clientId === client.id) : [];
-  const originName = String(ans.originName ?? "").trim() || clientLocs.find(l => l.kind === "Muat")?.name || "";
+  // AI kadang menyalin format "Nama (Kota)" dari prompt — cocokkan ke nama lokasi di master data.
+  const known = (name: string) => clientLocs.find(l => name === l.name || name.startsWith(l.name + " ("))?.name ?? name;
+  const originName = known(String(ans.originName ?? "").trim()) || clientLocs.find(l => l.kind === "Muat")?.name || "";
   if (!originName) uncertain.add("originName");
   const stops = (ans.stops ?? []).filter(s => s && String(s.name ?? "").trim()).slice(0, 10)
-    .map(s => ({ name: String(s.name).trim(), city: String(s.city ?? "").trim() || route?.destination || "" }));
-  if (stops.length === 0) { stops.push({ name: route ? `Titik bongkar 1 (${route.destination})` : "Titik bongkar 1", city: route?.destination ?? "" }); uncertain.add("stops"); }
+    .map(s => ({ name: known(String(s.name).trim()), city: String(s.city ?? "").trim() || route?.destination || "" }));
+  if (stops.length === 0) stops.push({ name: route ? `Titik bongkar 1 (${route.destination})` : "Titik bongkar 1", city: route?.destination ?? "" });
+  // Nama titik yang masih placeholder harus dilengkapi admin.
+  if (stops.some(s => /^Titik bongkar \d/i.test(s.name))) uncertain.add("stops");
+  // Jenis truk tidak disebut klien → hasil pilihan AI/kode, wajib dicek.
+  if (!/tronton|fuso|engkel|\bcde\b|\bcdd\b|double|trailer|kontainer|container|40 ?ft|wingbox|colt|box/i.test(text)) uncertain.add("truckTypeId");
 
   const cargoDesc = String(ans.cargoDesc ?? "").trim();
   if (!cargoDesc) uncertain.add("cargoDesc");
