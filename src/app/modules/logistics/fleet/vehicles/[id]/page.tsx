@@ -98,7 +98,7 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
       {tab === "service" && (
         <Card title="Service history">
           <div className="space-y-4">
-            {access.canFleet && <AddServiceForm vehicleId={v.id} odometerKm={v.odometerKm} />}
+            {access.canFleet && <AddServiceForm vehicleId={v.id} odometerKm={v.odometerKm} plateNo={v.plateNo} />}
             {v.services.length === 0 ? <p className="text-sm text-slate-500">Belum ada riwayat servis.</p> : (
               <div className="overflow-x-auto -mx-5">
                 <table className="w-full text-sm">

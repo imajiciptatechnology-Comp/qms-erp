@@ -1,9 +1,9 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, Plus, ScanLine, X } from "lucide-react";
+import { AlertTriangle, Camera, CheckCircle2, FileImage, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { compressImage } from "@/components/ScanDocumentButton";
-import { ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
+import { ErrorNote, btnPrimary, inputCls, labelCls, useAction } from "../ui";
 import { SERVICE_INTERVAL, addDays, normPlate } from "../lib";
 import { saveDriverDocument, saveServiceRecord, saveVehicleDocument, scanFleetDoc, setDocumentStatus } from "./actions";
 import type { FleetScanFields, ScanDocType } from "../ai/scanFleetDoc";
@@ -40,51 +40,125 @@ async function pdfFirstPageToJpeg(file: File): Promise<string> {
   return canvas.toDataURL("image/jpeg", 0.85);
 }
 
-/** File + tombol scan AI. Foto dikecilkan di browser sebelum diunggah/di-scan; PDF di-scan dari halaman pertama. */
+/** SVG (mis. contoh dokumen) → JPEG supaya bisa di-scan AI. */
+async function rasterizeSvg(svgText: string): Promise<string> {
+  const url = URL.createObjectURL(new Blob([svgText], { type: "image/svg+xml" }));
+  try {
+    const img = new Image();
+    await new Promise<void>((resolve, reject) => { img.onload = () => resolve(); img.onerror = () => reject(new Error("svg")); img.src = url; });
+    const w = img.naturalWidth || 1000;
+    const h = img.naturalHeight || 600;
+    const scale = Math.min(1.6, 1600 / Math.max(w, h));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.9);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+/** File lampiran + gambar untuk scan AI. Foto dikecilkan; PDF di-scan dari halaman pertama; SVG contoh diubah ke JPEG. */
 function useFilePick() {
   const [file, setFile] = useState<File | null>(null);
   const [dataUrl, setDataUrl] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
-  async function pick(f: File | undefined) {
+  /** Mengembalikan gambar untuk scan (null bila tidak bisa di-scan). */
+  async function pick(f: File | undefined): Promise<string | null> {
     setFileError(null);
     setDataUrl(null);
     setFile(null);
-    if (!f) return;
-    if (f.type.startsWith("image/")) {
-      try {
+    if (!f) return null;
+    try {
+      if (f.type === "image/svg+xml") {
+        const url = await rasterizeSvg(await f.text());
+        setDataUrl(url);
+        setFile(dataUrlToFile(url, f.name));
+        return url;
+      }
+      if (f.type.startsWith("image/")) {
         const url = await compressImage(f);
         setDataUrl(url);
         setFile(dataUrlToFile(url, f.name));
-      } catch {
-        setFileError("Gagal membaca foto. Coba file lain.");
+        return url;
       }
-    } else if (f.type === "application/pdf") {
-      if (f.size > 4 * 1024 * 1024) { setFileError("PDF maks. 4 MB."); return; }
-      setFile(f);
-      try {
-        setDataUrl(await pdfFirstPageToJpeg(f));
-      } catch {
-        setFileError("PDF tersimpan, tapi halaman pertamanya tidak bisa dibaca untuk scan AI. Isi manual atau pakai foto.");
+      if (f.type === "application/pdf") {
+        if (f.size > 4 * 1024 * 1024) { setFileError("PDF maks. 4 MB."); return null; }
+        setFile(f);
+        try {
+          const url = await pdfFirstPageToJpeg(f);
+          setDataUrl(url);
+          return url;
+        } catch {
+          setFileError("PDF dilampirkan, tapi halaman pertamanya tidak bisa dibaca untuk scan AI. Isi manual atau pakai foto.");
+          return null;
+        }
       }
-    } else setFileError("Pilih foto (JPG/PNG) atau PDF. Foto HEIC dari iPhone: ubah ke JPG dulu.");
+      setFileError("Pilih foto (JPG/PNG) atau PDF. Foto HEIC dari iPhone: ubah ke JPG dulu.");
+    } catch {
+      setFileError("Gagal membaca file. Coba foto/file lain.");
+    }
+    return null;
   }
-  return { file, dataUrl, fileError, pick };
+  /** Muat contoh dokumen (SVG dari server) sebagai lampiran + gambar scan. */
+  async function pickSample(sampleUrl: string, name: string): Promise<string | null> {
+    setFileError(null);
+    try {
+      const res = await fetch(sampleUrl);
+      if (!res.ok) throw new Error();
+      const url = await rasterizeSvg(await res.text());
+      setDataUrl(url);
+      setFile(dataUrlToFile(url, name));
+      return url;
+    } catch {
+      setFileError("Gagal memuat contoh dokumen.");
+      return null;
+    }
+  }
+  return { file, dataUrl, fileError, pick, pickSample, reset: () => { setFile(null); setDataUrl(null); setFileError(null); } };
 }
 
 type ScanState = { loading: boolean; error: string | null; note: string | null; warn: string[]; filled: Set<string> };
 const emptyScan: ScanState = { loading: false, error: null, note: null, warn: [], filled: new Set() };
 
-function ScanPanel({ scan, onScan, canScan, onClear }: { scan: ScanState; onScan: () => void; canScan: boolean; onClear: () => void }) {
+/**
+ * Kotak scan (pola sama dengan Scan dokumen di NCR): ambil foto dari kamera atau pilih file → langsung dilampirkan
+ * dan dibaca AI. "Contoh dokumen" membuka contoh; "Coba contoh" langsung memakai contoh itu.
+ */
+function ScanBox({ what, sampleUrl, file, fileError, scan, onFile, onSample, onClear, onRescan }: {
+  what: string; sampleUrl: string; file: File | null; fileError: string | null; scan: ScanState;
+  onFile: (f: File | undefined) => void; onSample: () => void; onClear: () => void; onRescan: (() => void) | null;
+}) {
+  const camRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const busy = scan.loading;
+  const pickBtn = "inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold border border-slate-300 bg-white text-slate-700 hover:border-blue-400 hover:text-blue-700 disabled:opacity-60 disabled:cursor-wait";
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" onClick={onScan} disabled={!canScan || scan.loading} className={btnSecondary}>
-          {scan.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4 text-blue-600" />}
-          {scan.loading ? "Membaca dokumen…" : "Scan with AI"}
-        </button>
-        <span className="text-xs text-slate-500">{scan.loading ? "AI gratis biasanya butuh 10–40 detik — jangan tutup form." : canScan ? "Field yang terbaca ditandai biru." : "Pilih foto/PDF dokumen dulu, lalu tekan Scan."}</span>
+    <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-sm text-slate-700 flex items-center gap-2 min-w-0">
+          <FileImage className="w-4 h-4 text-slate-500 shrink-0" aria-hidden />
+          <span><b className="text-slate-800">Punya {what}?</b> Foto atau upload — AI mengisi form otomatis.</span>
+        </p>
+        <div className="flex items-center gap-3">
+          <a href={sampleUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-slate-600 underline underline-offset-2 hover:text-blue-700">Contoh dokumen</a>
+          <button type="button" disabled={busy} onClick={onSample} className="text-xs font-semibold text-blue-700 hover:underline disabled:opacity-60">Coba pakai contoh</button>
+        </div>
       </div>
-      {scan.error && <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">{scan.error}</p>}
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" disabled={busy} onClick={() => camRef.current?.click()} className={pickBtn}><Camera className="w-4 h-4 text-blue-600" /> Ambil foto</button>
+        <button type="button" disabled={busy} onClick={() => fileRef.current?.click()} className={pickBtn}><Upload className="w-4 h-4 text-blue-600" /> Pilih file (foto/PDF)</button>
+        {busy && <span className="text-xs text-slate-600 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> AI membaca dokumen… biasanya 10–40 detik, jangan tutup form.</span>}
+        {!busy && file && <span className="text-xs text-slate-600 flex items-center gap-1"><Paperclip className="w-3.5 h-3.5" /> {file.name} dilampirkan{onRescan && <> · <button type="button" onClick={onRescan} className="text-blue-700 hover:underline">scan ulang</button></>}</span>}
+      </div>
+      <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
+      <input ref={fileRef} type="file" accept="image/*,application/pdf" className="hidden" onChange={e => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
+      {fileError && <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">{fileError}</p>}
+      {scan.error && <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">{scan.error} File tetap dilampirkan; isi field manual.</p>}
       {scan.note && (
         <div role="status" className="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-2 space-y-1">
           <p className="flex gap-1.5"><CheckCircle2 className="w-3.5 h-3.5 mt-0.5 text-blue-600 shrink-0" />{scan.note}</p>
@@ -110,8 +184,7 @@ export function AddDocumentForm({ kind, ownerId, plateNo, ownerName, types, canC
   const [f, setF] = useState<DocFields>(blank);
   const [aiJson, setAiJson] = useState<string | null>(null);
   const [scan, setScan] = useState<ScanState>(emptyScan);
-  const { file, dataUrl, fileError, pick } = useFilePick();
-  const fileRef = useRef<HTMLInputElement>(null);
+  const { file, dataUrl, fileError, pick, pickSample, reset } = useFilePick();
   const { pending, error, exec } = useAction();
   const set = (k: keyof DocFields) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setF(prev => ({ ...prev, [k]: e.target.value }));
@@ -121,10 +194,12 @@ export function AddDocumentForm({ kind, ownerId, plateNo, ownerName, types, canC
   const t = f.docType;
   const spec = types.find(x => x.value === t);
 
-  async function runScan() {
-    if (!dataUrl) return;
+  const sampleUrl = `/modules/logistics/fleet/sample/demo/${t}?${new URLSearchParams(kind === "vehicle" ? { plate: plateNo ?? "" } : { name: ownerName ?? "" })}`;
+
+  async function runScan(img: string | null) {
+    if (!img) return;
     setScan({ ...emptyScan, loading: true });
-    const res = await scanFleetDoc(t as ScanDocType, dataUrl);
+    const res = await scanFleetDoc(t as ScanDocType, img);
     if (!res.ok) { setScan({ ...emptyScan, error: res.error }); return; }
     const { detectedType, detectedLabel, fields } = res.result;
     const map: Partial<Record<keyof DocFields, string | undefined>> = {
@@ -162,7 +237,7 @@ export function AddDocumentForm({ kind, ownerId, plateNo, ownerName, types, canC
     if (file) fd.set("file", file);
     if (aiJson) { fd.set("aiJson", aiJson); fd.set("source", "Scan AI"); }
     exec(() => (kind === "vehicle" ? saveVehicleDocument(fd) : saveDriverDocument(fd)), () => {
-      setOpen(false); setF(blank); setAiJson(null); setScan(emptyScan); pick(undefined); if (fileRef.current) fileRef.current.value = "";
+      setOpen(false); setF(blank); setAiJson(null); setScan(emptyScan); reset();
     });
   }
 
@@ -181,13 +256,12 @@ export function AddDocumentForm({ kind, ownerId, plateNo, ownerName, types, canC
           <select value={t} onChange={set("docType")} className={inputCls}>{types.map(x => <option key={x.value} value={x.value}>{x.label}</option>)}</select>
           {spec && <span className="text-[11px] text-slate-500">{spec.hint}</span>}
         </label>
-        <label className="block md:col-span-2">
-          <span className={labelCls}>File (foto / PDF)</span>
-          <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={e => { setScan(emptyScan); pick(e.target.files?.[0]); }} className="block w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-slate-200 file:bg-white file:text-sm" />
-          {fileError && <span className="text-xs text-red-700">{fileError}</span>}
-        </label>
       </div>
-      <ScanPanel scan={scan} onScan={runScan} canScan={!!dataUrl} onClear={() => setScan(s => ({ ...s, note: null, warn: [] }))} />
+      <ScanBox what={`${spec?.label ?? "dokumen"}-nya`} sampleUrl={sampleUrl} file={file} fileError={fileError} scan={scan}
+        onFile={async fl => { setScan(emptyScan); runScan(await pick(fl)); }}
+        onSample={async () => { setScan(emptyScan); runScan(await pickSample(sampleUrl, `contoh-${t.toLowerCase()}.jpg`)); }}
+        onRescan={dataUrl ? () => runScan(dataUrl) : null}
+        onClear={() => setScan(s => ({ ...s, note: null, warn: [] }))} />
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <label className="block"><span className={labelCls}>Nomor dokumen</span><input value={f.docNo} onChange={set("docNo")} className={`${inputCls} ${mark("docNo")}`} /></label>
         {kind === "vehicle" ? (
@@ -228,24 +302,25 @@ export function AddDocumentForm({ kind, ownerId, plateNo, ownerName, types, canC
 // Riwayat servis
 // ---------------------------------------------------------
 
-export function AddServiceForm({ vehicleId, odometerKm }: { vehicleId: string; odometerKm: number }) {
+export function AddServiceForm({ vehicleId, odometerKm, plateNo }: { vehicleId: string; odometerKm: number; plateNo?: string }) {
   const [open, setOpen] = useState(false);
   const today = new Date().toISOString().split("T")[0];
   const blank = { serviceDate: today, odometerKm: String(Math.round(odometerKm)), workshop: "", kind: "Berkala", items: "", cost: "", nextServiceDate: "", nextServiceKm: "", notes: "" };
   const [f, setF] = useState(blank);
   const [scan, setScan] = useState<ScanState>(emptyScan);
-  const { file, dataUrl, fileError, pick } = useFilePick();
+  const { file, dataUrl, fileError, pick, pickSample, reset } = useFilePick();
   const { pending, error, exec } = useAction();
+  const sampleUrl = `/modules/logistics/fleet/sample/demo/SERVICE?${new URLSearchParams({ plate: plateNo ?? "", km: String(Math.round(odometerKm)) })}`;
   const set = (k: keyof typeof blank) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF(p => ({ ...p, [k]: e.target.value }));
   const mark = (k: string) => (scan.filled.has(k) ? aiMark : "");
   const km = Number(f.odometerKm) || 0;
   const autoDate = f.serviceDate ? addDays(f.serviceDate, SERVICE_INTERVAL.days) : "";
   const autoKm = km ? km + SERVICE_INTERVAL.km : 0;
 
-  async function runScan() {
-    if (!dataUrl) return;
+  async function runScan(img: string | null) {
+    if (!img) return;
     setScan({ ...emptyScan, loading: true });
-    const res = await scanFleetDoc("SERVICE", dataUrl);
+    const res = await scanFleetDoc("SERVICE", img);
     if (!res.ok) { setScan({ ...emptyScan, error: res.error }); return; }
     const x: FleetScanFields = res.result.fields;
     const map: Record<string, string | undefined> = {
@@ -266,7 +341,7 @@ export function AddServiceForm({ vehicleId, odometerKm }: { vehicleId: string; o
     fd.set("vehicleId", vehicleId);
     for (const [k, v] of Object.entries(f)) fd.set(k, v);
     if (file) fd.set("file", file);
-    exec(() => saveServiceRecord(fd), () => { setOpen(false); setF(blank); setScan(emptyScan); pick(undefined); });
+    exec(() => saveServiceRecord(fd), () => { setOpen(false); setF(blank); setScan(emptyScan); reset(); });
   }
 
   if (!open) return <button type="button" onClick={() => setOpen(true)} className={btnPrimary}><Plus className="w-4 h-4" /> Add service record</button>;
@@ -276,12 +351,11 @@ export function AddServiceForm({ vehicleId, odometerKm }: { vehicleId: string; o
         <p className="font-semibold text-slate-800">Add service record</p>
         <button type="button" onClick={() => setOpen(false)} aria-label="Tutup form" className="p-1 rounded text-slate-500 hover:text-slate-800"><X className="w-4 h-4" /></button>
       </div>
-      <label className="block">
-        <span className={labelCls}>Foto nota / work order (opsional)</span>
-        <input type="file" accept="image/*,application/pdf" onChange={e => { setScan(emptyScan); pick(e.target.files?.[0]); }} className="block w-full text-sm file:mr-3 file:px-3 file:py-1.5 file:rounded-lg file:border file:border-slate-200 file:bg-white file:text-sm" />
-        {fileError && <span className="text-xs text-red-700">{fileError}</span>}
-      </label>
-      <ScanPanel scan={scan} onScan={runScan} canScan={!!dataUrl} onClear={() => setScan(s => ({ ...s, note: null, warn: [] }))} />
+      <ScanBox what="nota / work order bengkel" sampleUrl={sampleUrl} file={file} fileError={fileError} scan={scan}
+        onFile={async fl => { setScan(emptyScan); runScan(await pick(fl)); }}
+        onSample={async () => { setScan(emptyScan); runScan(await pickSample(sampleUrl, "contoh-nota-servis.jpg")); }}
+        onRescan={dataUrl ? () => runScan(dataUrl) : null}
+        onClear={() => setScan(s => ({ ...s, note: null, warn: [] }))} />
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <label className="block"><span className={labelCls}>Tanggal servis</span><input type="date" required max={today} value={f.serviceDate} onChange={set("serviceDate")} className={`${inputCls} ${mark("serviceDate")}`} /></label>
         <label className="block"><span className={labelCls}>Odometer (km)</span><input inputMode="numeric" required value={f.odometerKm} onChange={set("odometerKm")} className={`${inputCls} ${mark("odometerKm")}`} /></label>
