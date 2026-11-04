@@ -257,6 +257,7 @@ async function handleP2HText(c: NonNullable<Ctx>, chatId: string, text: string) 
   const { result, notes, model } = await parseP2HText(text);
   const res = await recordP2H(c.trip!.id, result, notes, c.driver.name);
   await prisma.chatMessage.updateMany({ where: { chatId, direction: "in", at: { gte: new Date(Date.now() - 120_000).toISOString() }, aiJson: null }, data: { aiJson: JSON.stringify({ p2h: result, notes, model }) } });
+  if (res.status === "late") { await setState(c, {}); return reply(chatId, ctx, "Trip sudah berjalan, jadi P2H tidak diubah lagi. Laporkan masalah kendaraan dengan pesan biasa (mis. \"ban bocor\")."); }
   if (res.status === "incomplete") return reply(chatId, ctx, `Item kritis belum disebut: ${res.unknown.join(", ")}. Mohon sebutkan kondisinya juga.`);
   await setState(c, {});
   const list = P2H_ITEMS.map(i => `${result[i.key] === "ok" ? "✅" : result[i.key] === "fail" ? "❌" : "➖"} ${i.label}`).join("\n");
@@ -275,7 +276,11 @@ async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string,
   if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Pakai tombol menu, atau telepon kantor.");
   const state = getState(c);
   try {
-    if (state.awaiting === "p2h" && c.trip && state.tripId === c.trip.id) return await handleP2HText(c, chatId, text);
+    if (state.awaiting === "p2h") {
+      // P2H hanya berlaku sebelum berangkat (bisa saja trip sudah jalan lewat perangkat lain).
+      if (c.trip && state.tripId === c.trip.id && c.trip.status === "Scheduled") return await handleP2HText(c, chatId, text);
+      await setState(c, {});
+    }
     const r = await interpretDriverText(text, aiContext(c));
     if (r.intent === "p2h" && c.trip?.status === "Scheduled") return await handleP2HText(c, chatId, text);
     await prisma.chatMessage.updateMany({ where: { chatId, direction: "in", at: { gte: new Date(Date.now() - 120_000).toISOString() }, aiJson: null }, data: { aiJson: JSON.stringify({ intent: r.intent, model: r.model }) } });

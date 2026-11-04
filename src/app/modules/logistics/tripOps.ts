@@ -71,6 +71,8 @@ export type P2HResult = Record<string, "ok" | "fail" | "unknown">;
 
 /** Simpan hasil P2H. Item kritis gagal → trip tidak boleh berangkat (blokir #2, tanpa override). */
 export async function recordP2H(tripId: string, result: P2HResult, notes: string, by: string) {
+  const current = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true } });
+  if (current.status !== "Scheduled") return { status: "late" as const, unknown: [] as string[], fails: [] as string[] };
   const fails = P2H_ITEMS.filter(i => result[i.key] === "fail");
   const critical = fails.filter(i => i.critical);
   const unknown = P2H_ITEMS.filter(i => i.critical && result[i.key] !== "ok" && result[i.key] !== "fail");
