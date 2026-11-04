@@ -1,7 +1,11 @@
+import Link from "next/link";
+import { after } from "next/server";
+import { CalendarClock } from "lucide-react";
 import { prisma } from "@/lib/prisma";
+import { maybeRunFleetReminders } from "../fleetDocs";
 import { getLogisticsAccess } from "../server";
 import { TOLL_METHODS, driverFlags, vehicleFlags, type Flag } from "../lib";
-import { Card } from "../ui";
+import { Card, btnSecondary } from "../ui";
 
 function Flags({ flags, ok = "Siap" }: { flags: Flag[]; ok?: string }) {
   if (flags.length === 0) return <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">{ok}</span>;
@@ -25,23 +29,25 @@ export default async function FleetPage() {
     prisma.truckType.findMany({ orderBy: { sortOrder: "asc" } }),
   ]);
   const driverName = new Map(drivers.map(d => [d.id, d.name]));
+  after(() => maybeRunFleetReminders());
 
   return (
     <div className="space-y-6">
-      <Card title={`Trucks (${vehicles.length})`} actions={<span className="text-xs text-slate-500">Status kelayakan awal · blokir & override di Tahap 2</span>}>
+      <Card title={`Trucks (${vehicles.length})`} actions={<Link href="/modules/logistics/fleet/expiring" className={btnSecondary}><CalendarClock className="w-4 h-4" /> Expiring documents</Link>}>
         <div className="overflow-x-auto -mx-5">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 bg-slate-50">
-              <tr>{["Nopol", "Jenis", "Merek / tahun", "Odometer", "STNK", "KIR", "Servis berikut", "Tol", "Kondisi"].map(h => <th key={h} className={th}>{h}</th>)}</tr>
+              <tr>{["Nopol", "Jenis", "Merek / tahun", "Odometer", "STNK", "Pajak (PKB)", "KIR", "Servis berikut", "Tol", "Kondisi"].map(h => <th key={h} className={th}>{h}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {vehicles.map(v => (
                 <tr key={v.id}>
-                  <td className={`${td} font-semibold whitespace-nowrap`}>{v.plateNo}</td>
+                  <td className={`${td} font-semibold whitespace-nowrap`}><Link href={`/modules/logistics/fleet/vehicles/${v.id}`} className="text-blue-700 hover:underline">{v.plateNo}</Link></td>
                   <td className={`${td} whitespace-nowrap`}>{v.truckType.name}</td>
                   <td className={td}>{v.brand} · {v.year}</td>
                   <td className={`${td} tabular-nums whitespace-nowrap`}>{v.odometerKm.toLocaleString("id-ID")} km</td>
                   <td className={`${td} whitespace-nowrap`}>{v.stnkExpiry}</td>
+                  <td className={`${td} whitespace-nowrap`}>{v.pkbExpiry ?? "—"}</td>
                   <td className={`${td} whitespace-nowrap`}>{v.kirExpiry}</td>
                   <td className={`${td} whitespace-nowrap`}>{v.nextServiceDate}<br /><span className="text-xs text-slate-500">{v.nextServiceKm?.toLocaleString("id-ID")} km</span></td>
                   <td className={td}><span title={TOLL_METHODS[v.tollMethod]}>{v.tollMethod}</span>{v.tollCardNo ? <span className="block text-xs text-slate-500">{v.tollCardNo}</span> : null}</td>
@@ -51,7 +57,7 @@ export default async function FleetPage() {
             </tbody>
           </table>
         </div>
-        <p className="text-xs text-slate-500 mt-3">Metode tol: {Object.entries(TOLL_METHODS).map(([k, v]) => `${k} = ${v}`).join(" · ")}.</p>
+        <p className="text-xs text-slate-500 mt-3">Klik nopol/nama untuk tab Documents (STNK, pajak, KIR, asuransi, SIM, training) dan riwayat servis. Metode tol: {Object.entries(TOLL_METHODS).map(([k, v]) => `${k} = ${v}`).join(" · ")}.</p>
       </Card>
 
       <Card title={`Driver pool (${drivers.length}) — cross vehicle type`}>
@@ -66,7 +72,7 @@ export default async function FleetPage() {
                 return (
                   <tr key={d.id}>
                     <td className={`${td} whitespace-nowrap text-slate-500`}>{d.code}</td>
-                    <td className={`${td} font-medium whitespace-nowrap`}>{d.name}{d.userEmail ? <span className="block text-xs text-slate-500">login: {d.userEmail}</span> : null}</td>
+                    <td className={`${td} font-medium whitespace-nowrap`}><Link href={`/modules/logistics/fleet/drivers/${d.id}`} className="text-blue-700 hover:underline">{d.name}</Link>{d.userEmail ? <span className="block text-xs text-slate-500">login: {d.userEmail}</span> : null}</td>
                     <td className={`${td} whitespace-nowrap`}>{d.simClass}</td>
                     <td className={td}><span className="whitespace-nowrap">{d.simExpiry}</span> <Flags flags={driverFlags(d)} ok="Berlaku" /></td>
                     <td className={`${td} whitespace-nowrap`}>{String(d.experienceYears).replace(".", ",")} th</td>

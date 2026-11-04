@@ -194,13 +194,26 @@ export function qualifiesFor(d: { simClass: string; experienceYears: number; def
 
 export type Flag = { level: "red" | "amber"; text: string };
 
-export function vehicleFlags(v: { status: string; stnkExpiry: string | null; kirExpiry: string | null; nextServiceDate: string | null; nextServiceKm: number | null; odometerKm: number }, now = today()): Flag[] {
+type VehicleFlagInput = {
+  status: string; stnkExpiry: string | null; kirExpiry: string | null; nextServiceDate: string | null; nextServiceKm: number | null; odometerKm: number;
+  pkbExpiry?: string | null; insuranceExpiry?: string | null;
+};
+
+/** Selisih hari kalender (b − a), tanggal YYYY-MM-DD. */
+export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86_400_000);
+
+export function vehicleFlags(v: VehicleFlagInput, now = today()): Flag[] {
   const flags: Flag[] = [];
   if (v.status === "In Repair") flags.push({ level: "red", text: "Dalam perbaikan" });
   if (v.stnkExpiry && v.stnkExpiry < now) flags.push({ level: "red", text: `STNK habis ${v.stnkExpiry}` });
   else if (v.stnkExpiry && v.stnkExpiry <= addDays(now, 30)) flags.push({ level: "amber", text: `STNK habis ${v.stnkExpiry}` });
+  // Pajak tahunan telat = STNK tidak sah (blokir #5).
+  if (v.pkbExpiry && v.pkbExpiry < now) flags.push({ level: "red", text: `Pajak (PKB) telat ${daysBetween(v.pkbExpiry, now)} hari` });
+  else if (v.pkbExpiry && v.pkbExpiry <= addDays(now, 30)) flags.push({ level: "amber", text: `Pajak (PKB) jatuh tempo ${v.pkbExpiry}` });
   if (v.kirExpiry && v.kirExpiry < now) flags.push({ level: "red", text: `KIR habis ${v.kirExpiry}` });
   else if (v.kirExpiry && v.kirExpiry <= addDays(now, 30)) flags.push({ level: "amber", text: `KIR habis ${v.kirExpiry}` });
+  // Asuransi kendaraan: peringatan saja.
+  if (v.insuranceExpiry && v.insuranceExpiry <= addDays(now, 30)) flags.push({ level: "amber", text: `Asuransi habis ${v.insuranceExpiry}` });
   const overdueDate = v.nextServiceDate && v.nextServiceDate < now;
   const overdueKm = v.nextServiceKm != null && v.odometerKm > v.nextServiceKm;
   if (overdueDate || overdueKm) flags.push({ level: "amber", text: `Servis overdue${overdueKm ? ` ${Math.round(v.odometerKm - v.nextServiceKm!).toLocaleString("id-ID")} km` : ""}` });
@@ -214,3 +227,46 @@ export function driverFlags(d: { simExpiry: string }, now = today()): Flag[] {
 }
 
 export const TOLL_METHODS: Record<string, string> = { A: "Kartu e-toll perusahaan", B: "Tunai oleh sopir", C: "Kartu pribadi sopir", D: "Ditagihkan ke klien" };
+
+// ---------------------------------------------------------
+// Dokumen armada & sopir (rancangan 10.1)
+// ---------------------------------------------------------
+
+export type DocTypeSpec = { label: string; remindDays: number[]; hint: string };
+
+/** field = kolom masa berlaku di Vehicle yang diisi dari dokumen Verified terbaru. */
+export const VEHICLE_DOC_TYPES: Record<string, DocTypeSpec & { field: "stnkExpiry" | "pkbExpiry" | "kirExpiry" | "insuranceExpiry" }> = {
+  STNK: { label: "STNK", remindDays: [60, 30], field: "stnkExpiry", hint: "5 tahunan · habis → blokir #5" },
+  PKB: { label: "Pajak kendaraan (PKB)", remindDays: [30, 7], field: "pkbExpiry", hint: "tahunan · telat = STNK tidak sah → blokir #5" },
+  KIR: { label: "KIR", remindDays: [30, 7], field: "kirExpiry", hint: "6 bulanan · habis → blokir #5" },
+  INSURANCE: { label: "Asuransi kendaraan", remindDays: [30], field: "insuranceExpiry", hint: "peringatan saja" },
+};
+
+export const DRIVER_DOC_TYPES: Record<string, DocTypeSpec> = {
+  SIM: { label: "SIM", remindDays: [60, 30], hint: "habis → blokir #3 (tidak bisa override); golongan menentukan jenis truk" },
+  TRAINING_DEFENSIVE: { label: "Training defensive driving", remindDays: [30], hint: "syarat Tronton & Trailer" },
+  TRAINING_TRAILER: { label: "Sertifikat trailer/kontainer", remindDays: [30], hint: "syarat Trailer" },
+};
+
+export const DOC_STATUS_COLORS: Record<string, string> = {
+  Verified: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  Draft: "bg-amber-50 text-amber-800 border-amber-200",
+  Rejected: "bg-slate-100 text-slate-500 border-slate-200",
+};
+
+/** Servis berkala (dummy): tiap 10.000 km atau 90 hari, mana yang lebih dulu. */
+export const SERVICE_INTERVAL = { km: 10_000, days: 90 };
+
+/** Status masa berlaku: expired, remind (masuk jendela pengingat terlebar), ok. */
+export function expiryState(validUntil: string | null | undefined, remindDays: number[], now = today()) {
+  if (!validUntil) return { level: "none" as const, daysLeft: null as number | null };
+  const daysLeft = daysBetween(now, validUntil);
+  if (daysLeft < 0) return { level: "expired" as const, daysLeft };
+  if (daysLeft <= Math.max(...remindDays)) return { level: "remind" as const, daysLeft };
+  return { level: "ok" as const, daysLeft };
+}
+
+export const daysLeftText = (n: number | null) => n == null ? "—" : n < 0 ? `lewat ${-n} hari` : n === 0 ? "hari ini" : `${n} hari lagi`;
+
+/** Normalisasi nopol untuk membandingkan hasil scan dengan data truk ("B9408FXD"). */
+export const normPlate = (p: string) => p.replace(/[^A-Z0-9]/gi, "").toUpperCase();

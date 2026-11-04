@@ -7,7 +7,7 @@ import { scanDocument, type ScanFormType } from "@/app/actions/ai-scan";
 const MAX_SIDE = 1600;
 
 /** Kecilkan gambar di browser (maks 1600px, JPEG) agar cepat & di bawah batas upload. */
-async function compressImage(file: File): Promise<string> {
+export async function compressImage(file: File): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");

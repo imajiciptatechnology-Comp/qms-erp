@@ -942,13 +942,16 @@ model Vehicle {
   stnkExpiry        String?
   kirExpiry         String?
   insuranceExpiry   String?
+  pkbExpiry         String? // jatuh tempo pajak tahunan (PKB)
   nextServiceDate   String?
   nextServiceKm     Float?
   tollMethod        String    @default("A") // A kartu e-toll perusahaan | B tunai | C kartu pribadi sopir
   tollCardNo        String?
   preferredDriverId String?
   notes             String?
-  truckType         TruckType @relation(fields: [truckTypeId], references: [id])
+  truckType         TruckType              @relation(fields: [truckTypeId], references: [id])
+  documents         VehicleDocument[]
+  services          VehicleServiceRecord[]
 }
 
 model Driver {
@@ -966,6 +969,7 @@ model Driver {
   status            String                @default("Active")
   notes             String?
   qualifications    DriverQualification[]
+  documents         DriverDocument[]
 }
 
 /// Jenis kendaraan yang boleh dibawa sopir. basis: auto (SIM + training + pengalaman) | manual-add | manual-revoke.
@@ -1046,4 +1050,84 @@ model CharterOrderStop {
   city    String?
   note    String?
   order   CharterOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+// ---------------------------------------------------------
+// LOGISTIK — dokumen armada & sopir (rancangan bagian 10.1)
+// Riwayat versi: dokumen lama tidak dihapus. Kolom masa berlaku di Vehicle/Driver
+// diisi dari dokumen Verified dengan masa berlaku terbaru per jenis.
+// ---------------------------------------------------------
+
+/// docType: STNK | PKB | KIR | INSURANCE. status: Draft | Verified | Rejected.
+model VehicleDocument {
+  id          String  @id @default(cuid())
+  vehicleId   String
+  docType     String
+  docNo       String?
+  holderName  String? // nama pemilik (STNK) / perusahaan asuransi
+  validFrom   String?
+  validUntil  String?
+  amount      Float? // nominal pajak / premi
+  paidDate    String? // tanggal bayar pajak
+  fileUrl     String?
+  fileName    String?
+  aiJson      String? // hasil scan AI mentah (untuk jejak)
+  source      String  @default("Manual") // Manual | Scan AI | Telegram | Demo Data
+  status      String  @default("Verified")
+  notes       String?
+  createdBy   String
+  createdAt   String
+  verifiedBy  String?
+  verifiedAt  String?
+  vehicle     Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, docType])
+}
+
+/// docType: SIM | TRAINING_DEFENSIVE | TRAINING_TRAILER. status: Draft | Verified | Rejected.
+model DriverDocument {
+  id         String  @id @default(cuid())
+  driverId   String
+  docType    String
+  docNo      String?
+  simClass   String? // B1 Umum | B2 Umum (khusus SIM)
+  holderName String?
+  issuer     String? // Satpas / lembaga training
+  validFrom  String?
+  validUntil String?
+  fileUrl    String?
+  fileName   String?
+  aiJson     String?
+  source     String  @default("Manual")
+  status     String  @default("Verified")
+  notes      String?
+  createdBy  String
+  createdAt  String
+  verifiedBy String?
+  verifiedAt String?
+  driver     Driver  @relation(fields: [driverId], references: [id], onDelete: Cascade)
+
+  @@index([driverId, docType])
+}
+
+/// Riwayat servis. kind: Berkala (menghitung ulang jadwal servis berikutnya) | Perbaikan.
+model VehicleServiceRecord {
+  id              String  @id @default(cuid())
+  vehicleId       String
+  serviceDate     String
+  odometerKm      Float
+  workshop        String
+  kind            String  @default("Berkala")
+  items           String
+  cost            Float   @default(0)
+  fileUrl         String?
+  fileName        String?
+  nextServiceDate String?
+  nextServiceKm   Float?
+  notes           String?
+  createdBy       String
+  createdAt       String
+  vehicle         Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, serviceDate])
 }

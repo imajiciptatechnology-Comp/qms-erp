@@ -29,6 +29,7 @@ import {
   Tags,
   Users,
   Smartphone,
+  CalendarClock,
   X
 } from "lucide-react";
 
@@ -64,6 +65,7 @@ export const LOGISTICS_MENU = [
   { id: "log-orders", name: "Charter Orders", path: "/modules/logistics/orders", icon: ClipboardPlus, perm: "logistics" },
   { id: "log-rates", name: "Rates & Routes", path: "/modules/logistics/rates", icon: Tags, perm: "logistics" },
   { id: "log-fleet", name: "Fleet & Crew", path: "/modules/logistics/fleet", icon: Truck, perm: "logistics" },
+  { id: "log-expiring", name: "Expiring Documents", path: "/modules/logistics/fleet/expiring", icon: CalendarClock, perm: "logistics" },
   { id: "log-clients", name: "Clients", path: "/modules/logistics/clients", icon: Users, perm: "logistics" },
   { id: "log-driver", name: "Driver App", path: "/driver", icon: Smartphone, perm: "logistics_driver" },
 ];
@@ -161,7 +163,9 @@ export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClos
               Logistik
             </div>
             {logisticsItems.map((mod) => {
-              const isActive = mod.exact ? pathname === mod.path : pathname === mod.path || pathname.startsWith(mod.path + "/");
+              const hit = (m: typeof mod) => m.exact ? pathname === m.path : pathname === m.path || pathname.startsWith(m.path + "/");
+              // Menu dengan path terpanjang yang cocok yang aktif (Fleet & Crew vs Expiring Documents).
+              const isActive = hit(mod) && !logisticsItems.some(o => o.path.length > mod.path.length && hit(o));
               return (
                 <Link
                   key={mod.id}

@@ -145,16 +145,16 @@ const LOCATIONS = [
 
 // ---------- Armada 10 truk (+ skenario kelayakan) ----------
 const VEHICLES = [
-  { id: "VH-01", plateNo: "B 9101 FXA", type: "CDE", brand: "Mitsubishi Colt Diesel", year: 2021, odometerKm: 182000, stnk: 220, kir: 95, svcDate: 40, svcKm: 190000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0001" },
-  { id: "VH-02", plateNo: "B 9102 FXA", type: "CDE", brand: "Isuzu Elf", year: 2022, odometerKm: 131000, stnk: 300, kir: 120, svcDate: 25, svcKm: 140000, tollMethod: "B", notes: "Skenario demo: P2H gagal pada rem (kritis) — tidak boleh jalan." },
-  { id: "VH-03", plateNo: "B 9203 FXB", type: "CDD", brand: "Mitsubishi Colt Diesel", year: 2020, odometerKm: 244000, stnk: -12, kir: 60, svcDate: 30, svcKm: 250000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0003", notes: "Skenario demo: STNK sudah habis, sedang proses perpanjangan." },
-  { id: "VH-04", plateNo: "B 9204 FXB", type: "CDD", brand: "Isuzu Elf NMR", year: 2023, odometerKm: 88000, stnk: 400, kir: 150, svcDate: 50, svcKm: 95000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0004" },
-  { id: "VH-05", plateNo: "B 9205 FXB", type: "CDD", brand: "Hino Dutro", year: 2022, odometerKm: 120500, stnk: 260, kir: 75, svcDate: -9, svcKm: 120000, tollMethod: "C", notes: "Skenario demo: servis berkala overdue (9 hari / 500 km)." },
-  { id: "VH-06", plateNo: "B 9306 FXC", type: "FUSO", brand: "Mitsubishi Fuso Fighter", year: 2021, odometerKm: 205000, stnk: 180, kir: 40, svcDate: 20, svcKm: 210000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0006" },
-  { id: "VH-07", plateNo: "B 9307 FXC", type: "FUSO", brand: "Hino Ranger", year: 2019, odometerKm: 310000, stnk: 90, kir: 70, svcDate: 15, svcKm: 315000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0007", status: "In Repair", notes: "Skenario demo: sedang perbaikan (ganti kampas kopling)." },
-  { id: "VH-08", plateNo: "B 9408 FXD", type: "TRONTON", brand: "Hino Ranger FL", year: 2022, odometerKm: 156000, stnk: 330, kir: 110, svcDate: 35, svcKm: 165000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0008" },
-  { id: "VH-09", plateNo: "B 9409 FXD", type: "TRONTON", brand: "Isuzu Giga", year: 2023, odometerKm: 74000, stnk: 500, kir: 160, svcDate: 60, svcKm: 85000, tollMethod: "B" },
-  { id: "VH-10", plateNo: "B 9510 FXE", type: "TRAILER", brand: "Hino 700 + Trailer 40 ft", year: 2021, odometerKm: 268000, stnk: 210, kir: 85, svcDate: 28, svcKm: 280000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0010" },
+  { id: "VH-01", pkb: 140, plateNo: "B 9101 FXA", type: "CDE", brand: "Mitsubishi Colt Diesel", year: 2021, odometerKm: 182000, stnk: 220, kir: 95, svcDate: 40, svcKm: 190000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0001" },
+  { id: "VH-02", pkb: 75, plateNo: "B 9102 FXA", type: "CDE", brand: "Isuzu Elf", year: 2022, odometerKm: 131000, stnk: 300, kir: 120, svcDate: 25, svcKm: 140000, tollMethod: "B", notes: "Skenario demo: P2H gagal pada rem (kritis) — tidak boleh jalan." },
+  { id: "VH-03", pkb: 200, plateNo: "B 9203 FXB", type: "CDD", brand: "Mitsubishi Colt Diesel", year: 2020, odometerKm: 244000, stnk: -12, kir: 60, svcDate: 30, svcKm: 250000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0003", notes: "Skenario demo: STNK sudah habis, sedang proses perpanjangan." },
+  { id: "VH-04", pkb: -5, plateNo: "B 9204 FXB", type: "CDD", brand: "Isuzu Elf NMR", year: 2023, odometerKm: 88000, stnk: 400, kir: 150, svcDate: 50, svcKm: 95000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0004", notes: "Skenario demo: pajak tahunan (PKB) telat 5 hari — STNK tidak sah sampai dibayar." },
+  { id: "VH-05", pkb: 110, plateNo: "B 9205 FXB", type: "CDD", brand: "Hino Dutro", year: 2022, odometerKm: 120500, stnk: 260, kir: 75, svcDate: -9, svcKm: 120000, tollMethod: "C", notes: "Skenario demo: servis berkala overdue (9 hari / 500 km)." },
+  { id: "VH-06", pkb: 26, plateNo: "B 9306 FXC", type: "FUSO", brand: "Mitsubishi Fuso Fighter", year: 2021, odometerKm: 205000, stnk: 180, kir: 40, svcDate: 20, svcKm: 210000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0006" },
+  { id: "VH-07", pkb: 160, plateNo: "B 9307 FXC", type: "FUSO", brand: "Hino Ranger", year: 2019, odometerKm: 310000, stnk: 90, kir: 70, svcDate: 15, svcKm: 315000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0007", status: "In Repair", notes: "Skenario demo: sedang perbaikan (ganti kampas kopling)." },
+  { id: "VH-08", pkb: 230, plateNo: "B 9408 FXD", type: "TRONTON", brand: "Hino Ranger FL", year: 2022, odometerKm: 156000, stnk: 330, kir: 110, svcDate: 35, svcKm: 165000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0008" },
+  { id: "VH-09", pkb: 95, plateNo: "B 9409 FXD", type: "TRONTON", brand: "Isuzu Giga", year: 2023, odometerKm: 74000, stnk: 500, kir: 160, svcDate: 60, svcKm: 85000, tollMethod: "B" },
+  { id: "VH-10", pkb: 180, plateNo: "B 9510 FXE", type: "TRAILER", brand: "Hino 700 + Trailer 40 ft", year: 2021, odometerKm: 268000, stnk: 210, kir: 85, svcDate: 28, svcKm: 280000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0010" },
 ];
 
 // ---------- Sopir 12 orang ----------
@@ -223,6 +223,74 @@ function price(o, rates, surcharges, client, type) {
   return { baseRate: base, surchargeTotal: gross - base, discountPercent, discountAmount, subtotal, taxPercent: 11, taxAmount, total: subtotal + taxAmount, breakdownJson: JSON.stringify(lines) };
 }
 
+// ---------- Dokumen armada & sopir (rancangan 10.1) ----------
+// Gambar contoh dibuat dinamis oleh route /modules/logistics/fleet/sample/<kind>/<id> (berwatermark "CONTOH").
+const PKB_AMOUNT = { CDE: 1.85e6, CDD: 2.4e6, FUSO: 3.6e6, TRONTON: 5.2e6, TRAILER: 7.8e6 };
+/** Polis asuransi tahunan: jatuh tempo dalam 1 tahun ke depan (VH-03 → 18 hari, muncul sebagai peringatan). */
+const insOffset = v => ((v.stnk + 30) % 365 + 365) % 365 || 365;
+const SAMPLE = (kind, id) => `/modules/logistics/fleet/sample/${kind}/${id}`;
+
+async function upsert(model, id, data) {
+  await prisma[model].upsert({ where: { id }, update: data, create: { id, ...data } });
+}
+
+async function seedFleetDocuments() {
+  const base = { source: "Demo Data", status: "Verified", createdBy: "Demo Data", verifiedBy: "Agus Saputra" };
+  for (const v of VEHICLES) {
+    const vid = P + v.id;
+    const plateDigits = v.plateNo.replace(/\D/g, "");
+    const at = n => day(n) + "T08:00:00.000Z";
+    const vdoc = async (suffix, data) => {
+      const id = `${P}VDOC-${v.id}-${suffix}`;
+      await upsert("vehicleDocument", id, { vehicleId: vid, ...base, verifiedAt: data.createdAt, fileUrl: SAMPLE("vehicle", id), notes: null, ...data });
+    };
+    await vdoc("STNK-1", { docType: "STNK", docNo: `STNK-${plateDigits}-${v.year}`, holderName: "PT Arunika Trans Nusantara", validFrom: day(v.stnk - 1825), validUntil: day(v.stnk), fileName: "contoh-stnk.svg", createdAt: at(v.stnk - 1825) });
+    if (v.stnk < 0) {
+      // Bukti proses perpanjangan (bahan override #5 di Tahap 2): draft tanpa masa berlaku baru.
+      await vdoc("STNK-2", { docType: "STNK", docNo: null, holderName: "PT Arunika Trans Nusantara", validFrom: null, validUntil: null, status: "Draft", verifiedBy: null, verifiedAt: null, fileUrl: null, fileName: null,
+        notes: "Proses perpanjangan STNK 5 tahunan di Samsat — tanda terima sudah ada, STNK baru belum terbit.", createdAt: at(-3) });
+    }
+    await vdoc("PKB-1", { docType: "PKB", docNo: `SKPD-${plateDigits}-${day(v.pkb - 365).slice(0, 4)}`, holderName: "PT Arunika Trans Nusantara", validFrom: day(v.pkb - 730), validUntil: day(v.pkb - 365), amount: PKB_AMOUNT[v.type], paidDate: day(v.pkb - 733), fileName: "contoh-pkb.svg", createdAt: at(v.pkb - 733) });
+    await vdoc("PKB-2", { docType: "PKB", docNo: `SKPD-${plateDigits}-${day(v.pkb).slice(0, 4)}`, holderName: "PT Arunika Trans Nusantara", validFrom: day(v.pkb - 365), validUntil: day(v.pkb), amount: PKB_AMOUNT[v.type], paidDate: day(v.pkb - 368), fileName: "contoh-pkb.svg", createdAt: at(v.pkb - 368) });
+    await vdoc("KIR-1", { docType: "KIR", docNo: `KIR-BKS-${plateDigits}-A`, validFrom: day(v.kir - 364), validUntil: day(v.kir - 182), fileName: "contoh-kir.svg", createdAt: at(v.kir - 364) });
+    await vdoc("KIR-2", { docType: "KIR", docNo: `KIR-BKS-${plateDigits}-B`, validFrom: day(v.kir - 182), validUntil: day(v.kir), fileName: "contoh-kir.svg", createdAt: at(v.kir - 182) });
+    await vdoc("INS-1", { docType: "INSURANCE", docNo: `POL-AK-${plateDigits}`, holderName: "Asuransi Contoh Sejahtera (fiktif)", validFrom: day(insOffset(v) - 365), validUntil: day(insOffset(v)), amount: Math.round(PKB_AMOUNT[v.type] * 2.2), fileName: "contoh-polis.svg", createdAt: at(insOffset(v) - 365) });
+
+    // Riwayat servis: dua servis berkala; yang terakhir menentukan jadwal berikutnya (svcDate / svcKm).
+    const lastKm = Math.min(v.svcKm - 10000, v.odometerKm - 500);
+    const small = v.type === "CDE" || v.type === "CDD";
+    const svc = async (suffix, data) => {
+      const id = `${P}SVC-${v.id}-${suffix}`;
+      await upsert("vehicleServiceRecord", id, { vehicleId: vid, createdBy: "Demo Data", createdAt: data.serviceDate + "T09:00:00.000Z", fileUrl: SAMPLE("service", id), fileName: "contoh-nota-servis.svg", notes: null, ...data });
+    };
+    await svc("1", { serviceDate: day(v.svcDate - 180), odometerKm: lastKm - 10000, workshop: "Bengkel Contoh Diesel Cikarang", kind: "Berkala", items: "Ganti oli mesin & filter oli, cek rem & kopling", cost: small ? 1.1e6 : 2.4e6, nextServiceDate: day(v.svcDate - 90), nextServiceKm: lastKm });
+    await svc("2", { serviceDate: day(v.svcDate - 90), odometerKm: lastKm, workshop: "Bengkel Contoh Diesel Cikarang", kind: "Berkala", items: "Ganti oli mesin, filter oli & solar, grease, setel rem", cost: small ? 1.35e6 : 2.9e6, nextServiceDate: day(v.svcDate), nextServiceKm: v.svcKm });
+    if (v.id === "VH-07") {
+      await svc("3", { serviceDate: day(-2), odometerKm: v.odometerKm, workshop: "Bengkel Contoh Truk Bekasi", kind: "Perbaikan", items: "Ganti kampas kopling & bearing (dalam pengerjaan)", cost: 4.75e6, nextServiceDate: null, nextServiceKm: null, notes: "Estimasi selesai 3 hari." });
+    }
+  }
+
+  for (const d of DRIVERS) {
+    const did = P + d.id;
+    const simNo = `SIM-${d.id.slice(-2)}00${d.id.slice(-2)}`;
+    const at = n => day(n) + "T08:00:00.000Z";
+    const ddoc = async (suffix, data) => {
+      const id = `${P}DDOC-${d.id}-${suffix}`;
+      await upsert("driverDocument", id, { driverId: did, ...base, holderName: d.name, verifiedAt: data.createdAt, fileUrl: SAMPLE("driver", id), notes: null, ...data });
+    };
+    // SIM periode lalu (sopir B2 dulu masih B1) + SIM yang berlaku sekarang.
+    await ddoc("SIM-1", { docType: "SIM", docNo: simNo.replace("SIM-", "SIM-L"), simClass: "B1 Umum", issuer: "Satpas Contoh Bekasi", validFrom: day(d.simExp - 3650), validUntil: day(d.simExp - 1825), fileName: "contoh-sim.svg", createdAt: at(d.simExp - 3650) });
+    await ddoc("SIM-2", { docType: "SIM", docNo: simNo, simClass: d.sim, issuer: "Satpas Contoh Bekasi", validFrom: day(d.simExp - 1825), validUntil: day(d.simExp), fileName: "contoh-sim.svg", createdAt: at(d.simExp - 1825) });
+    if (d.training) {
+      const until = d.id === "DRV-03" ? 20 : 430; // DRV-03: sertifikat training hampir habis (muncul di Expiring documents)
+      await ddoc("TRN-1", { docType: "TRAINING_DEFENSIVE", docNo: `DDT-${d.id.slice(-2)}-2025`, issuer: "Lembaga Pelatihan Keselamatan Contoh", validFrom: day(until - 730), validUntil: day(until), fileName: "contoh-sertifikat.svg", createdAt: at(until - 730) });
+    }
+    if (d.trailer) {
+      await ddoc("TRL-1", { docType: "TRAINING_TRAILER", docNo: `TRL-${d.id.slice(-2)}-2025`, issuer: "Lembaga Pelatihan Keselamatan Contoh", validFrom: day(-200), validUntil: day(530), fileName: "contoh-sertifikat.svg", createdAt: at(-200) });
+    }
+  }
+}
+
 async function main() {
   await ensureRolesAndUsers();
   await prisma.companyProfile.upsert({ where: { key: COMPANY.key }, update: { ...COMPANY, id: undefined }, create: COMPANY });
@@ -254,7 +322,7 @@ async function main() {
   for (const v of VEHICLES) {
     const data = {
       plateNo: v.plateNo, truckTypeId: typeId(v.type), brand: v.brand, year: v.year, status: v.status ?? "Ready", odometerKm: v.odometerKm,
-      stnkExpiry: day(v.stnk), kirExpiry: day(v.kir), insuranceExpiry: day(v.stnk + 30), nextServiceDate: day(v.svcDate), nextServiceKm: v.svcKm,
+      stnkExpiry: day(v.stnk), kirExpiry: day(v.kir), insuranceExpiry: day(insOffset(v)), pkbExpiry: day(v.pkb), nextServiceDate: day(v.svcDate), nextServiceKm: v.svcKm,
       tollMethod: v.tollMethod, tollCardNo: v.tollCardNo ?? null, notes: v.notes ?? null,
     };
     await prisma.vehicle.upsert({ where: { id: P + v.id }, update: data, create: { id: P + v.id, ...data } });
@@ -277,6 +345,8 @@ async function main() {
     await prisma.helper.upsert({ where: { id: P + h.id }, update: data, create: { id: P + h.id, ...data } });
   }
 
+  await seedFleetDocuments();
+
   const surcharges = await prisma.rateSurcharge.findMany();
   const ym = day(0).slice(0, 7).replace("-", "/");
   for (const o of ORDERS) {
@@ -298,6 +368,8 @@ async function main() {
     } });
   }
 
+  const docCounts = await Promise.all([prisma.vehicleDocument.count({ where: { id: { startsWith: P } } }), prisma.driverDocument.count({ where: { id: { startsWith: P } } }), prisma.vehicleServiceRecord.count({ where: { id: { startsWith: P } } })]);
+  console.log(`Dokumen demo — truk ${docCounts[0]}, sopir ${docCounts[1]}, riwayat servis ${docCounts[2]}.`);
   const counts = await Promise.all([prisma.vehicle.count({ where: { id: { startsWith: P } } }), prisma.driver.count({ where: { id: { startsWith: P } } }), prisma.helper.count({ where: { id: { startsWith: P } } }), prisma.logisticsClient.count({ where: { id: { startsWith: P } } }), prisma.logisticsRoute.count({ where: { id: { startsWith: P } } }), prisma.charterRate.count({ where: { id: { startsWith: P } } }), prisma.charterOrder.count({ where: { id: { startsWith: P } } })]);
   console.log(`Logistik demo OK — truk ${counts[0]}, sopir ${counts[1]}, kenek ${counts[2]}, klien ${counts[3]}, rute ${counts[4]}, tarif ${counts[5]}, order contoh ${counts[6]}.`);
   console.log(`Akun demo (password ${PASSWORD}): ${USERS.map(u => u.email).join(", ")}`);
