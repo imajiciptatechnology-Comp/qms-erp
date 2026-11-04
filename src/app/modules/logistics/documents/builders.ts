@@ -5,7 +5,7 @@ import { safeName, tanggal, terbilangRupiah } from "@/app/modules/sales/document
 import { getLogisticsBrand } from "../server";
 import { rupiah, type PriceLine } from "../lib";
 
-export const LOG_DOC_KINDS = ["charter-quote"] as const;
+export const LOG_DOC_KINDS = ["charter-quote", "surat-jalan"] as const;
 export type LogDocKind = (typeof LOG_DOC_KINDS)[number];
 
 /** Penawaran tarif charter (status Draft) / Konfirmasi order charter (Confirmed dst.). */
@@ -58,8 +58,53 @@ async function charterQuote(id: string): Promise<DocModel | null> {
   };
 }
 
+/** Surat Jalan (rancangan P1.6): truk, sopir, kenek, muatan, segel, rute, titik bongkar, tanda tangan. Hanya bila sudah terbit. */
+async function suratJalan(id: string): Promise<DocModel | null> {
+  const t = await prisma.trip.findUnique({
+    where: { id },
+    include: { vehicle: { include: { truckType: true } }, driver: true, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } }, overrides: true },
+  });
+  if (!t || !t.suratJalanNo) return null;
+  const { brand, city, signers } = await getLogisticsBrand();
+  const o = t.order;
+  const date = (t.suratJalanAt ?? t.createdAt).slice(0, 10);
+  const stops = o?.stops ?? [];
+  return {
+    brand,
+    fileName: safeName(`Surat Jalan ${t.suratJalanNo} ${t.vehicle.plateNo}`),
+    title: "SURAT JALAN",
+    number: t.suratJalanNo,
+    watermark: t.status === "Cancelled" ? "DIBATALKAN" : undefined,
+    recipient: { label: "Kepada Yth. (penerima barang)", name: t.client?.name ?? "-", lines: stops.map(s => `${s.seq}. ${s.name}${s.city ? `, ${s.city}` : ""}`) },
+    meta: [["Tanggal", `${city}, ${tanggal(date)}`], ["No. trip", t.tripNo], ["No. order", o?.orderNo ?? "-"], ["Ref. klien", o?.clientRef || "-"]],
+    blocks: [
+      { type: "kv", title: "Armada & kru", rows: [
+        ["Kendaraan", `${t.vehicle.plateNo} · ${t.vehicle.truckType.name} (${t.vehicle.truckType.capacityTon} ton) · ${t.vehicle.brand ?? ""}`],
+        ["Sopir", `${t.driver.name} (${t.driver.code}) · SIM ${t.driver.simClass} ${t.driver.simNo ?? ""} · HP ${t.driver.phone ?? "-"}`],
+        ["Kenek", t.helper ? `${t.helper.name} (${t.helper.code})` : "-"],
+      ] },
+      { type: "kv", title: "Rute & jadwal", rows: [
+        ["Rute", t.route ? `${t.route.origin} → ${t.route.destination} (±${t.route.distanceKm} km)` : "-"],
+        ["Muat", o ? `${o.originName}${o.originAddress ? `, ${o.originAddress}` : ""} · ${tanggal(o.loadDate)}${o.loadTime ? ` pukul ${o.loadTime}` : ""}` : "-"],
+        ["Titik bongkar", stops.map(s => `${s.seq}. ${s.name}`).join("; ") || "-"],
+      ] },
+      { type: "table", columns: [{ label: "No", width: 0.5, align: "center" }, { label: "Uraian muatan", width: 4 }, { label: "Berat", width: 1.2, align: "right" }, { label: "Jumlah diterima", width: 1.6, align: "center" }, { label: "Catatan", width: 1.8 }],
+        rows: [["1", { text: o?.cargoDesc ?? "-", sub: o?.cargoValue ? `Nilai barang ${rupiah(o.cargoValue)}` : null }, o?.cargoWeightTon ? `${o.cargoWeightTon} ton` : "-", "", ""]] },
+      { type: "kv", title: "Segel", rows: [["No. segel", "........................................ (diisi saat muat)"], ["Kondisi segel saat bongkar", "Utuh / Rusak *coret salah satu"]] },
+      ...(t.overrides.length ? [{ type: "note" as const, text: `Catatan dispatch: trip ini berjalan dengan ${t.overrides.length} override (${t.overrides.map(x => `#${x.condition.split(":")[0]} oleh ${x.byName}`).join(", ")}). Detail tercatat di sistem.` }] : []),
+      { type: "note", text: "Barang diterima dalam keadaan baik dan jumlah sesuai, kecuali dicatat di kolom catatan. Selisih/kerusakan wajib ditulis sebelum tanda tangan." },
+    ],
+    signatures: [
+      { lead: "Dikeluarkan oleh,", org: brand.company, name: t.suratJalanBy ?? signers.find(s => s.key === "fleet")?.name ?? "", title: "Dispatcher" },
+      { lead: "Pengemudi,", name: t.driver.name, title: `Sopir · ${t.vehicle.plateNo}` },
+      { lead: "Diterima oleh,", name: "(.................................)", title: "Nama, tanda tangan & stempel penerima" },
+    ],
+  };
+}
+
 export async function buildLogisticsDocument(kind: LogDocKind, id: string) {
   switch (kind) {
     case "charter-quote": return charterQuote(id);
+    case "surat-jalan": return suratJalan(id);
   }
 }

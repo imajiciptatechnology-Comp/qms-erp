@@ -265,9 +265,11 @@ async function handleP2HText(c: NonNullable<Ctx>, chatId: string, text: string) 
     await notifyPermission("logistics_fleet", [`P2H GAGAL ${c.trip!.vehicle.plateNo} (${c.driver.name}): ${res.critical!.join(", ")} — truk tidak boleh berangkat.`], "/modules/logistics/tracking");
     return reply(chatId, ctx, `${list}\n\n⛔ Item kritis bermasalah (${res.critical!.join(", ")}). Truk TIDAK BOLEH berangkat. Fleet Manager sudah diberi tahu; tunggu arahan.`);
   }
-  if (res.fails.length) await notifyPermission("logistics_fleet", [`P2H ${c.trip!.vehicle.plateNo}: item non-kritis bermasalah (${res.fails.join(", ")}).`], "/modules/logistics/tracking");
+  if (res.fails.length) await notifyPermission("logistics_fleet", [`P2H ${c.trip!.vehicle.plateNo}: item non-kritis bermasalah (${res.fails.join(", ")}) — perlu override Fleet sebelum berangkat.`], `/modules/logistics/trips/${c.trip!.id}`);
   const fresh = (await loadContext(chatId))!;
-  return reply(chatId, ctx, `${list}\n\n✅ P2H lolos${res.fails.length ? ` dengan catatan (${res.fails.join(", ")}) — sudah diteruskan ke Fleet Manager` : ""}. Silakan berangkat.`, { inline: await tripButtons(fresh) });
+  return reply(chatId, ctx, res.fails.length
+    ? `${list}\n\n⚠️ Item non-kritis bermasalah (${res.fails.join(", ")}). Fleet Manager sudah diberi tahu; tunggu persetujuan (override) sebelum berangkat.`
+    : `${list}\n\n✅ P2H lolos. ${fresh.trip?.suratJalanNo ? "Silakan berangkat." : "Tunggu Surat Jalan terbit dari dispatcher, lalu berangkat."}`, { inline: await tripButtons(fresh) });
 }
 
 async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string, source: "text" | "voice") {

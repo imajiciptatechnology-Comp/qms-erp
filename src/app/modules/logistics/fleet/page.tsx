@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { maybeRunFleetReminders } from "../fleetDocs";
 import { getLogisticsAccess } from "../server";
 import { TOLL_METHODS, driverFlags, vehicleFlags, type Flag } from "../lib";
+import { vehicleConditions, vehicleRuleInclude } from "../dispatchRules";
 import { Card, btnSecondary } from "../ui";
 
 function Flags({ flags, ok = "Siap" }: { flags: Flag[]; ok?: string }) {
@@ -16,6 +17,13 @@ function Flags({ flags, ok = "Siap" }: { flags: Flag[]; ok?: string }) {
   );
 }
 
+/** Kondisi kelayakan (3.5) + peringatan dokumen: merah = tidak bisa di-override, kuning = bisa jalan dengan override/peringatan. */
+function vehicleStatusFlags(v: Parameters<typeof vehicleConditions>[0] & Parameters<typeof vehicleFlags>[0]): Flag[] {
+  const conds = vehicleConditions(v).map(c => ({ level: c.level === "none" ? "red" : "amber", text: `#${c.code} ${c.text}` }) as Flag);
+  const extra = vehicleFlags(v).filter(f => f.level === "amber" && !conds.some(c => c.text.includes(f.text.split(" ")[0])));
+  return [...conds, ...extra];
+}
+
 const th = "text-left font-semibold px-5 py-2.5 whitespace-nowrap";
 const td = "px-5 py-2.5 align-top";
 
@@ -23,7 +31,7 @@ export default async function FleetPage() {
   const { access } = await getLogisticsAccess();
   if (!access.canView) return null;
   const [vehicles, drivers, helpers, types] = await Promise.all([
-    prisma.vehicle.findMany({ include: { truckType: true }, orderBy: [{ truckType: { sortOrder: "asc" } }, { plateNo: "asc" }] }),
+    prisma.vehicle.findMany({ include: vehicleRuleInclude, orderBy: [{ truckType: { sortOrder: "asc" } }, { plateNo: "asc" }] }),
     prisma.driver.findMany({ include: { qualifications: { include: { truckType: true } } }, orderBy: { code: "asc" } }),
     prisma.helper.findMany({ orderBy: { code: "asc" } }),
     prisma.truckType.findMany({ orderBy: { sortOrder: "asc" } }),
@@ -51,7 +59,7 @@ export default async function FleetPage() {
                   <td className={`${td} whitespace-nowrap`}>{v.kirExpiry}</td>
                   <td className={`${td} whitespace-nowrap`}>{v.nextServiceDate}<br /><span className="text-xs text-slate-500">{v.nextServiceKm?.toLocaleString("id-ID")} km</span></td>
                   <td className={td}><span title={TOLL_METHODS[v.tollMethod]}>{v.tollMethod}</span>{v.tollCardNo ? <span className="block text-xs text-slate-500">{v.tollCardNo}</span> : null}</td>
-                  <td className={td}><Flags flags={vehicleFlags(v)} />{v.notes && <p className="text-xs text-slate-500 mt-1 max-w-xs">{v.notes}</p>}</td>
+                  <td className={td}><Flags flags={vehicleStatusFlags(v)} />{v.notes && <p className="text-xs text-slate-500 mt-1 max-w-xs">{v.notes}</p>}</td>
                 </tr>
               ))}
             </tbody>

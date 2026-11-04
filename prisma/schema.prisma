@@ -955,6 +955,7 @@ model Vehicle {
   documents         VehicleDocument[]
   services          VehicleServiceRecord[]
   trips             Trip[]
+  preTripChecks     PreTripCheck[]
 }
 
 model Driver {
@@ -969,6 +970,7 @@ model Driver {
   experienceYears   Float                 @default(0)
   defensiveTraining Boolean               @default(false)
   trailerCertified  Boolean               @default(false)
+  unsettledAdvance  Float                 @default(0) // uang jalan belum di-settle (Tahap 3 mengisi dari DriverLedger)
   status            String                @default("Active")
   notes             String?
   qualifications    DriverQualification[]
@@ -1126,6 +1128,8 @@ model VehicleServiceRecord {
   odometerKm      Float
   workshop        String
   kind            String  @default("Berkala")
+  status          String  @default("Done") // Open (corrective belum selesai / maintenance request) | Done
+  system          String? // rem | kemudi | ban | lampu | lainnya — rem/kemudi/ban/lampu = sistem kritis
   items           String
   cost            Float   @default(0)
   fileUrl         String?
@@ -1148,43 +1152,49 @@ model VehicleServiceRecord {
 /// status: Scheduled | ToLoad | Loading | InTransit | Unloading | Returning | Completed | Cancelled.
 /// Trip simulasi (isSimulated) bergerak sendiri mengikuti planJson; trip nyata diisi dari bot Telegram.
 model Trip {
-  id              String           @id @default(cuid())
-  tripNo          String           @unique
+  id              String             @id @default(cuid())
+  tripNo          String             @unique
   orderId         String?
   routeId         String?
   clientId        String?
   vehicleId       String
   driverId        String
   helperId        String?
-  status          String           @default("Scheduled")
+  status          String             @default("Scheduled")
   plannedStart    String // ISO datetime
   promisedArrival String? // janji tiba di titik bongkar pertama (ISO)
   startedAt       String?
   completedAt     String?
   p2hDoneAt       String?
-  stopsDone       Int              @default(0)
-  planJson        String           @default("[]") // fase + jalur [[lat,lng]] untuk peta/simulasi/ETA
-  isSimulated     Boolean          @default(false)
+  stopsDone       Int                @default(0)
+  planJson        String             @default("[]") // fase + jalur [[lat,lng]] untuk peta/simulasi/ETA
+  isSimulated     Boolean            @default(false)
   simScenario     String? // normal | late | stalled | silent | noP2H
   simStartedAt    String?
-  simSpeed        Float            @default(1) // menit simulasi per menit nyata
-  simOffsetMin    Float            @default(0)
+  simSpeed        Float              @default(1) // menit simulasi per menit nyata
+  simOffsetMin    Float              @default(0)
   lastLat         Float?
   lastLng         Float?
   lastPingAt      String?
   lastSpeedKmh    Float?
+  suratJalanNo    String? // nomor urut per bulan (ATN/SJ/yyyy/mm/nnnn)
+  suratJalanAt    String?
+  suratJalanBy    String?
+  dutyAckJson     String? // { by, at, warnings[] } — pengakuan peringatan jam kerja (1.3b)
   notes           String?
   createdBy       String
   createdAt       String
-  order           CharterOrder?    @relation(fields: [orderId], references: [id])
-  route           LogisticsRoute?  @relation(fields: [routeId], references: [id])
-  client          LogisticsClient? @relation(fields: [clientId], references: [id])
-  vehicle         Vehicle          @relation(fields: [vehicleId], references: [id])
-  driver          Driver           @relation(fields: [driverId], references: [id])
-  helper          Helper?          @relation(fields: [helperId], references: [id])
+  order           CharterOrder?      @relation(fields: [orderId], references: [id])
+  route           LogisticsRoute?    @relation(fields: [routeId], references: [id])
+  client          LogisticsClient?   @relation(fields: [clientId], references: [id])
+  vehicle         Vehicle            @relation(fields: [vehicleId], references: [id])
+  driver          Driver             @relation(fields: [driverId], references: [id])
+  helper          Helper?            @relation(fields: [helperId], references: [id])
   events          TripEvent[]
   pings           LocationPing[]
   chatMessages    ChatMessage[]
+  overrides       DispatchOverride[]
+  preTripChecks   PreTripCheck[]
 
   @@index([status])
 }
@@ -1268,4 +1278,46 @@ model ChatMessage {
 
   @@index([driverId, at])
   @@index([at])
+}
+
+// ---------------------------------------------------------
+// LOGISTIK — Tahap 2: dispatch, blokir Surat Jalan & override berjenjang (rancangan 3.5)
+// ---------------------------------------------------------
+
+/// Override satu kondisi blokir untuk SATU trip. level: fleet | ops | director.
+model DispatchOverride {
+  id            String  @id @default(cuid())
+  tripId        String
+  condition     String // kunci kondisi 3.5, mis. "5:STNK", "6:service", "3b:helper"
+  conditionText String
+  level         String
+  reason        String
+  controlAction String
+  evidenceUrl   String?
+  evidenceName  String?
+  byName        String
+  byRole        String
+  at            String
+  followUpId    String? // maintenance request otomatis setelah trip selesai
+  trip          Trip    @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([at])
+}
+
+/// P2H (pemeriksaan harian) per kendaraan. resultJson: { rem: ok|fail|unknown, ... }.
+model PreTripCheck {
+  id            String  @id @default(cuid())
+  vehicleId     String
+  tripId        String?
+  driverId      String?
+  at            String
+  resultJson    String
+  criticalFails String? // dipisah koma
+  otherFails    String?
+  notes         String?
+  source        String  @default("Telegram") // Telegram | Simulator | Kantor | Demo Data
+  vehicle       Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  trip          Trip?   @relation(fields: [tripId], references: [id], onDelete: SetNull)
+
+  @@index([vehicleId, at])
 }

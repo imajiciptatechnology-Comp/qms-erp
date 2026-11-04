@@ -7,6 +7,8 @@ import { TOLL_METHODS, VEHICLE_DOC_TYPES, daysLeftText, expiryState, rupiah, veh
 import { Card, InfoRow } from "../../../ui";
 import { DocTable, Tabs } from "../../DocTable";
 import { AddDocumentForm, AddServiceForm } from "../../DocumentForms";
+import { CloseServiceButton, OfficeP2HButton } from "../../FleetButtons";
+import { LEVEL_LABEL, vehicleConditions } from "../../../dispatchRules";
 
 function Flags({ flags }: { flags: Flag[] }) {
   if (!flags.length) return <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">Siap</span>;
@@ -20,10 +22,12 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
   const { tab = "overview" } = await searchParams;
   const v = await prisma.vehicle.findUnique({
     where: { id },
-    include: { truckType: true, documents: { orderBy: { createdAt: "desc" } }, services: { orderBy: [{ serviceDate: "desc" }, { odometerKm: "desc" }] } },
+    include: { truckType: true, documents: { orderBy: { createdAt: "desc" } }, services: { orderBy: [{ serviceDate: "desc" }, { odometerKm: "desc" }] }, preTripChecks: { orderBy: { at: "desc" }, take: 1 } },
   });
   if (!v) notFound();
-  const flags = vehicleFlags(v);
+  const conds = vehicleConditions({ ...v, services: v.services.filter(x => x.status === "Open") });
+  const flags: Flag[] = [...conds.map(c => ({ level: c.level === "none" ? "red" : "amber", text: `#${c.code} ${c.text}` }) as Flag), ...vehicleFlags(v).filter(f => f.level === "amber" && !conds.some(c => c.text.startsWith(f.text.split(" ")[0])))];
+  const p2h = v.preTripChecks[0];
   const base = `/modules/logistics/fleet/vehicles/${v.id}`;
   const drafts = v.documents.filter(d => d.status === "Draft").length;
   const types = Object.entries(VEHICLE_DOC_TYPES).map(([value, s]) => ({ value, label: s.label, hint: s.hint }));
@@ -48,6 +52,13 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
             <InfoRow label="Odometer">{v.odometerKm.toLocaleString("id-ID")} km</InfoRow>
             <InfoRow label="Metode tol">{v.tollMethod} — {TOLL_METHODS[v.tollMethod]}{v.tollCardNo ? ` · ${v.tollCardNo}` : ""}</InfoRow>
             {v.notes && <InfoRow label="Catatan">{v.notes}</InfoRow>}
+          </Card>
+          <Card title="Dispatch readiness (3.5)">
+            {conds.length === 0 ? <p className="text-sm text-emerald-700">Siap jalan — tidak ada kondisi blokir.</p> : (
+              <ul className="space-y-1 text-sm">{conds.map(c => <li key={c.key} className={c.level === "none" ? "text-red-700" : "text-amber-800"}>#{c.code} {c.text} <span className="text-xs opacity-75">· {LEVEL_LABEL[c.level]}</span></li>)}</ul>
+            )}
+            <p className="text-xs text-slate-500 mt-3">P2H terakhir: {p2h ? `${p2h.at.slice(0, 16).replace("T", " ")} · ${p2h.criticalFails ? `gagal kritis (${p2h.criticalFails})` : p2h.otherFails ? `gagal non-kritis (${p2h.otherFails})` : "semua OK"} · ${p2h.source}` : "—"}</p>
+            {access.canFleet && p2h && (p2h.criticalFails || p2h.otherFails) && <div className="mt-2"><OfficeP2HButton vehicleId={v.id} /></div>}
           </Card>
           <Card title="Validity (from verified documents)" actions={<Link href={`${base}?tab=documents`} className="text-sm text-blue-700 hover:underline">Documents{drafts ? ` · ${drafts} draft` : ""}</Link>}>
             <ul className="divide-y divide-slate-100 -my-2 text-sm">
@@ -96,7 +107,11 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
                       <tr key={s.id}>
                         <td className="px-4 py-2.5 whitespace-nowrap">{s.serviceDate}</td>
                         <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{s.odometerKm.toLocaleString("id-ID")}</td>
-                        <td className="px-4 py-2.5"><span className={`text-xs px-2 py-0.5 rounded-full border ${s.kind === "Berkala" ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-orange-50 text-orange-700 border-orange-200"}`}>{s.kind}</span></td>
+                        <td className="px-4 py-2.5">
+                          <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${s.kind === "Berkala" ? "bg-blue-50 text-blue-700 border-blue-200" : s.kind === "Request" ? "bg-violet-50 text-violet-700 border-violet-200" : "bg-orange-50 text-orange-700 border-orange-200"}`}>{s.kind === "Request" ? "Maintenance request" : s.kind}{s.system ? ` · ${s.system}` : ""}</span>
+                          {s.status === "Open" && <span className="block mt-1 text-xs text-red-700 font-semibold">Open</span>}
+                          {s.status === "Open" && access.canFleet && <span className="block mt-1"><CloseServiceButton id={s.id} /></span>}
+                        </td>
                         <td className="px-4 py-2.5">{s.workshop}</td>
                         <td className="px-4 py-2.5 max-w-xs">{s.items}{s.notes && <span className="block text-xs text-slate-500">{s.notes}</span>}</td>
                         <td className="px-4 py-2.5 tabular-nums whitespace-nowrap">{rupiah(s.cost)}</td>

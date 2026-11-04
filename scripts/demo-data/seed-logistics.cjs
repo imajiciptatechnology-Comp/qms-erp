@@ -136,6 +136,7 @@ const LOCATIONS = [
   { id: "LOC-BKU-PLANT", client: "BKU", name: "Plant Baja Konstruksi Cikarang", kind: "Muat", city: "Cikarang", lat: -6.2820, lng: 107.1710 },
   { id: "LOC-BKU-MRK", client: "BKU", name: "Proyek Dermaga Merak", kind: "Bongkar", city: "Merak", lat: -5.9311, lng: 105.9963 },
   { id: "LOC-KPI-WH", client: "KPI", name: "Gudang Kemas Plastindo Bekasi", kind: "Muat", city: "Bekasi", lat: -6.2383, lng: 106.9756 },
+  { id: "LOC-KPI-JKT", client: "KPI", name: "Customer Kemas Jakarta Utara", kind: "Bongkar", city: "Jakarta", lat: -6.1214, lng: 106.8740 },
   { id: "LOC-KPI-BDG", client: "KPI", name: "Customer Kemas Bandung", kind: "Bongkar", city: "Bandung", lat: -6.9175, lng: 107.6191 },
   { id: "LOC-ATM-WH", client: "ATM", name: "Gudang Agro Tani Karawang", kind: "Muat", city: "Karawang", lat: -6.3227, lng: 107.3376 },
   { id: "LOC-ATM-CRB", client: "ATM", name: "Kios Pupuk Cirebon", kind: "Bongkar", city: "Cirebon", lat: -6.7320, lng: 108.5523 },
@@ -200,6 +201,8 @@ const ORDERS = [
     stops: ["LOC-SPL-SMG", "LOC-SPL-KDL", "LOC-SPL-UNG"], tkbm: true, status: "Confirmed", source: "Teks", ref: "PO-SPL-2611-018" },
   { id: "ORD-002", no: 2, client: "EPI", route: "SBY", type: "FUSO", load: 2, time: "08:00", origin: "LOC-EPI-WH", cargo: "Televisi LED 43\" (320 unit)", ton: 6.5, value: 1.6e9,
     stops: ["LOC-EPI-SBY"], insurance: true, escort: true, status: "Draft", source: "Manual", ref: "DO-EPI-7731" },
+  { id: "ORD-004", no: 4, client: "KPI", route: "JKT", type: "CDE", load: 1, time: "09:00", origin: "LOC-KPI-WH", cargo: "Gulungan plastik film (60 roll)", ton: 2.1, value: 60e6,
+    stops: ["LOC-KPI-JKT"], status: "Confirmed", source: "Manual" },
   { id: "ORD-003", no: 3, client: "KPI", route: "BDG", type: "CDD", load: 0, time: "13:00", origin: "LOC-KPI-WH", cargo: "Botol PET & preform (180 bal)", ton: 3.8, value: 85e6,
     stops: ["LOC-KPI-BDG"], status: "Confirmed", source: "Suara" },
 ];
@@ -266,7 +269,7 @@ async function seedFleetDocuments() {
     await svc("1", { serviceDate: day(v.svcDate - 180), odometerKm: lastKm - 10000, workshop: "Bengkel Contoh Diesel Cikarang", kind: "Berkala", items: "Ganti oli mesin & filter oli, cek rem & kopling", cost: small ? 1.1e6 : 2.4e6, nextServiceDate: day(v.svcDate - 90), nextServiceKm: lastKm });
     await svc("2", { serviceDate: day(v.svcDate - 90), odometerKm: lastKm, workshop: "Bengkel Contoh Diesel Cikarang", kind: "Berkala", items: "Ganti oli mesin, filter oli & solar, grease, setel rem", cost: small ? 1.35e6 : 2.9e6, nextServiceDate: day(v.svcDate), nextServiceKm: v.svcKm });
     if (v.id === "VH-07") {
-      await svc("3", { serviceDate: day(-2), odometerKm: v.odometerKm, workshop: "Bengkel Contoh Truk Bekasi", kind: "Perbaikan", items: "Ganti kampas kopling & bearing (dalam pengerjaan)", cost: 4.75e6, nextServiceDate: null, nextServiceKm: null, notes: "Estimasi selesai 3 hari." });
+      await svc("3", { serviceDate: day(-2), odometerKm: v.odometerKm, workshop: "Bengkel Contoh Truk Bekasi", kind: "Perbaikan", status: "Open", system: "lainnya", items: "Ganti kampas kopling & bearing (dalam pengerjaan)", cost: 4.75e6, nextServiceDate: null, nextServiceKm: null, notes: "Estimasi selesai 3 hari." });
     }
   }
 
@@ -288,6 +291,19 @@ async function seedFleetDocuments() {
     if (d.trailer) {
       await ddoc("TRL-1", { docType: "TRAINING_TRAILER", docNo: `TRL-${d.id.slice(-2)}-2025`, issuer: "Lembaga Pelatihan Keselamatan Contoh", validFrom: day(-200), validUntil: day(530), fileName: "contoh-sertifikat.svg", createdAt: at(-200) });
     }
+  }
+}
+
+// ---------- Tahap 2: skenario blokir & jam kerja ----------
+async function seedStage2() {
+  await upsert("preTripCheck", P + "P2H-VH-02", { vehicleId: P + "VH-02", at: day(0) + "T06:10:00.000Z", resultJson: JSON.stringify({ rem: "fail", kemudi: "ok", ban: "ok", lampu: "ok", apar: "ok", wiper: "ok", klakson: "ok", kabin: "ok" }), criticalFails: "Rem", otherFails: null, notes: "Rem blong saat dicoba di pool (skenario demo).", source: "Demo Data" });
+  // Eko Prasetyo (DRV-05) sudah bertugas 6 hari berturut-turut → trip hari ini/besok memicu peringatan > 6 hari.
+  for (let k = 1; k <= 6; k++) {
+    const id = `${P}HIST-DRV05-${k}`;
+    const start = day(-k) + "T06:00:00.000Z";
+    const end = day(-k) + "T14:30:00.000Z";
+    await upsert("trip", id, { tripNo: `HIST-${day(-k).replace(/-/g, "").slice(2)}-E${k}`, routeId: routeId("JKT"), clientId: clientId("KPI"), vehicleId: P + "VH-04", driverId: P + "DRV-05",
+      status: "Completed", plannedStart: start, startedAt: start, completedAt: end, p2hDoneAt: start, planJson: "{}", notes: "Riwayat trip demo (jam kerja)", createdBy: "Demo Data", createdAt: start });
   }
 }
 
@@ -331,6 +347,7 @@ async function main() {
     const data = {
       code: d.id.replace("DRV-", "SPR-"), name: d.name, phone: d.phone, userEmail: d.email ?? null, simClass: d.sim, simNo: `SIM-${d.id.slice(-2)}00${d.id.slice(-2)}`,
       simExpiry: day(d.simExp), experienceYears: d.exp, defensiveTraining: !!d.training, trailerCertified: !!d.trailer, status: "Active", notes: d.notes ?? null,
+      unsettledAdvance: d.id === "DRV-07" ? 350000 : 0,
     };
     await prisma.driver.upsert({ where: { id: P + d.id }, update: data, create: { id: P + d.id, ...data } });
     for (const t of TYPES) {
@@ -346,6 +363,7 @@ async function main() {
   }
 
   await seedFleetDocuments();
+  await seedStage2();
 
   const surcharges = await prisma.rateSurcharge.findMany();
   const ym = day(0).slice(0, 7).replace("-", "/");

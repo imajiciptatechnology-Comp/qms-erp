@@ -9,6 +9,11 @@ export default async function LogisticsOverview() {
   const { access } = await getLogisticsAccess();
   if (!access.canView) return null;
   const month = today().slice(0, 7);
+  const [overridesMonth, waitingDispatch, noSj] = await Promise.all([
+    prisma.dispatchOverride.count({ where: { at: { startsWith: month } } }),
+    prisma.charterOrder.count({ where: { status: "Confirmed" } }),
+    prisma.trip.count({ where: { isSimulated: false, status: "Scheduled", suratJalanNo: null } }),
+  ]);
   const [orders, vehicles, drivers] = await Promise.all([
     prisma.charterOrder.findMany({ include: { client: { select: { name: true } }, route: { select: { code: true, destination: true } }, truckType: { select: { name: true } } }, orderBy: [{ loadDate: "asc" }] }),
     prisma.vehicle.findMany({ include: { truckType: { select: { name: true } } } }),
@@ -29,6 +34,12 @@ export default async function LogisticsOverview() {
         <StatCard label="Order value (month)" value={rupiah(thisMonth.reduce((s, o) => s + o.total, 0))} sub="termasuk PPN" icon={<Wallet className="w-6 h-6" />} tone="emerald" />
         <StatCard label="Trucks ready" value={`${ready} / ${vehicles.length}`} sub={`${attention.length} perlu perhatian`} icon={<Truck className="w-6 h-6" />} tone={attention.length ? "amber" : "emerald"} />
         <StatCard label="Drivers" value={drivers.length} sub={simAlerts.length ? `${simAlerts.length} SIM hampir/sudah habis` : "semua SIM berlaku"} icon={<Users className="w-6 h-6" />} tone={simAlerts.length ? "amber" : "slate"} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <Link href="/modules/logistics/dispatch" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Waiting for dispatch</p><p className="text-2xl font-bold text-slate-800">{waitingDispatch}</p><p className="text-xs text-slate-500">order Confirmed belum dapat truk</p></Link>
+        <Link href="/modules/logistics/trips" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Trips without Surat Jalan</p><p className="text-2xl font-bold text-amber-700">{noSj}</p><p className="text-xs text-slate-500">menunggu override / penerbitan</p></Link>
+        <Link href="/modules/logistics/trips" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Overrides this month</p><p className="text-2xl font-bold text-slate-800">{overridesMonth}</p><p className="text-xs text-slate-500">jejak audit blokir yang dilewati</p></Link>
       </div>
 
       {access.canOrder && (
@@ -79,7 +90,7 @@ export default async function LogisticsOverview() {
             ))}
             {attention.length + simAlerts.length === 0 && <li className="text-slate-500">Semua armada & sopir siap.</li>}
           </ul>
-          <p className="text-xs text-slate-400 mt-3">Blokir Surat Jalan & override berjenjang menyusul di Tahap 2 (dispatch).</p>
+          <p className="text-xs text-slate-400 mt-3">Kondisi blokir lengkap (3.5) dicek di papan Dispatch.</p>
         </Card>
       </div>
     </div>

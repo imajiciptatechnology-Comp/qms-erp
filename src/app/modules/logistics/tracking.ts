@@ -2,7 +2,8 @@
 // Bukan "use server": dipanggil dari server actions, halaman, dan webhook bot.
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
-import { qualifiesFor, vehicleFlags, driverFlags, today } from "./lib";
+import { qualifiesFor, driverFlags, today } from "./lib";
+import { readiness, vehicleConditions, vehicleRuleInclude } from "./dispatchRules";
 import {
   ACTIVE_TRIP_STATUSES, DRIVING_STATUSES, TRIP_STATUSES, firstUnloadMin, fullPath, haversineKm, parsePlan, pathKm, phaseStarts, planTotal,
   positionAt, splitPath, type LatLng, type Phase, type TripPlan,
@@ -112,7 +113,7 @@ export async function startSimulation(userName: string, speed: number) {
   await resetSimulation();
   const [orders, vehicles, drivers, helpers, routes, clients, active] = await Promise.all([
     prisma.charterOrder.findMany({ where: { status: "Confirmed" }, include: { route: true, truckType: true, stops: { orderBy: { seq: "asc" } } }, orderBy: { loadDate: "asc" } }),
-    prisma.vehicle.findMany({ include: { truckType: true } }),
+    prisma.vehicle.findMany({ include: vehicleRuleInclude }),
     prisma.driver.findMany({ where: { status: "Active" }, include: { qualifications: { include: { truckType: true } } } }),
     prisma.helper.findMany({ where: { status: "Active" } }),
     prisma.logisticsRoute.findMany(),
@@ -127,8 +128,8 @@ export async function startSimulation(userName: string, speed: number) {
   const specs: SimSpec[] = orders.filter(o => !busyO.has(o.id)).slice(0, 2).map((o, i) => ({ orderId: o.id, typeCode: o.truckType.code, routeCode: o.route.code, scenario: "normal", at: i === 0 ? "transit40" : "unloading" }));
   specs.push(...EXTRA_SPECS);
 
-  // Truk: tidak merah, tidak sedang jalan; P2H rem gagal (skenario VH-02) belum dimodelkan → dilewati lewat catatan.
-  const vehicleOk = (v: (typeof vehicles)[number]) => !busyV.has(v.id) && v.status === "Ready" && !vehicleFlags(v).some(f => f.level === "red") && !/P2H gagal/i.test(v.notes ?? "");
+  // Truk: tidak "tidak layak" (3.5) dan tidak sedang jalan.
+  const vehicleOk = (v: (typeof vehicles)[number]) => !busyV.has(v.id) && readiness(vehicleConditions(v)) !== "unfit";
   // Sopir yang punya akun/bot (mis. Slamet, HP presenter) disisakan untuk trip nyata lewat Telegram.
   const driverOk = (d: (typeof drivers)[number], code: string) => !busyD.has(d.id) && !d.userEmail && !driverFlags(d).some(f => f.level === "red")
     && qualifiesFor(d, code) && d.qualifications.some(q => q.truckType.code === code && q.basis !== "manual-revoke");
@@ -138,7 +139,7 @@ export async function startSimulation(userName: string, speed: number) {
   const order = ["TRAILER", "TRONTON", "FUSO", "CDD", "CDE"];
   const sorted = [...specs].sort((a, b) => order.indexOf(a.typeCode) - order.indexOf(b.typeCode));
   for (const [n, spec] of sorted.entries()) {
-    const candidates = vehicles.filter(v => v.truckType.code === spec.typeCode && vehicleOk(v)).sort((a, b) => vehicleFlags(a).length - vehicleFlags(b).length);
+    const candidates = vehicles.filter(v => v.truckType.code === spec.typeCode && vehicleOk(v)).sort((a, b) => vehicleConditions(a).length - vehicleConditions(b).length);
     const v = candidates[0];
     const d = drivers.filter(x => driverOk(x, spec.typeCode)).sort((a, b) => driverFlags(a).length - driverFlags(b).length || a.experienceYears - b.experienceYears)[0];
     if (!v || !d) continue;
@@ -356,15 +357,14 @@ export async function getFleetSnapshot(): Promise<FleetSnapshot> {
   const advanced = await Promise.all(trips.map(t => advanceTrip(t).catch(err => { console.error("[tracking] advance", err); return t; })));
   const units = advanced.filter(t => ACTIVE_TRIP_STATUSES.includes(t.status)).map(t => toUnit(t, now));
   const deployed = new Set(units.map(u => u.vehicleId));
-  const vehicles = await prisma.vehicle.findMany({ include: { truckType: true, services: { where: { kind: "Perbaikan" }, orderBy: { serviceDate: "desc" }, take: 1 } }, orderBy: [{ truckType: { sortOrder: "asc" } }, { plateNo: "asc" }] });
+  const vehicles = await prisma.vehicle.findMany({ include: { ...vehicleRuleInclude, services: { where: { status: "Open" }, orderBy: { serviceDate: "desc" as const } } }, orderBy: [{ truckType: { sortOrder: "asc" } }, { plateNo: "asc" }] });
   const idle: IdleUnit[] = vehicles.filter(v => !deployed.has(v.id)).map(v => {
-    const flags = vehicleFlags(v);
-    const p2hFail = /P2H gagal/i.test(v.notes ?? "");
-    const reasons = [...flags.map(f => f.text), ...(p2hFail ? ["P2H gagal (rem)"] : [])];
+    const conds = vehicleConditions(v);
     const repair = v.status === "In Repair";
-    const state: IdleUnit["state"] = repair ? "repair" : p2hFail || flags.some(f => f.level === "red") ? "unfit" : flags.length ? "attention" : "ready";
-    const svc = v.services[0];
-    return { id: v.id, plateNo: v.plateNo, truckType: v.truckType.name, state, reasons, note: repair && svc ? `${svc.items} · sejak ${svc.serviceDate}${svc.notes ? ` · ${svc.notes}` : ""}` : null };
+    const r = readiness(conds);
+    const state: IdleUnit["state"] = repair ? "repair" : r === "unfit" ? "unfit" : r === "attention" ? "attention" : "ready";
+    const svc = v.services.find(s => s.kind === "Perbaikan");
+    return { id: v.id, plateNo: v.plateNo, truckType: v.truckType.name, state, reasons: conds.map(c => c.text), note: repair && svc ? `${svc.items} · sejak ${svc.serviceDate}${svc.notes ? ` · ${svc.notes}` : ""}` : null };
   });
   const sim = advanced.find(t => t.isSimulated && ACTIVE_TRIP_STATUSES.includes(t.status));
   return { at: new Date(now).toISOString(), units, idle, simulation: { running: !!sim, speed: sim?.simSpeed ?? null } };

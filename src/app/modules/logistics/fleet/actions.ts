@@ -194,3 +194,26 @@ export async function saveServiceRecord(fd: FormData) {
     return rec.id;
   });
 }
+
+/** Fleet Manager: tandai perbaikan/maintenance request selesai. Truk "In Repair" kembali Ready bila tidak ada perbaikan terbuka. */
+export async function closeServiceRecord(id: string) {
+  return run(async () => {
+    const { user } = await guard(a => a.canFleet);
+    const rec = await prisma.vehicleServiceRecord.findUniqueOrThrow({ where: { id } });
+    await prisma.vehicleServiceRecord.update({ where: { id }, data: { status: "Done", notes: [rec.notes, `Selesai: ${user.name} ${today()}`].filter(Boolean).join(" · ") } });
+    const open = await prisma.vehicleServiceRecord.count({ where: { vehicleId: rec.vehicleId, status: "Open", kind: "Perbaikan" } });
+    const v = await prisma.vehicle.findUniqueOrThrow({ where: { id: rec.vehicleId } });
+    if (!open && v.status === "In Repair") await prisma.vehicle.update({ where: { id: v.id }, data: { status: "Ready" } });
+    return id;
+  });
+}
+
+/** Fleet Manager: P2H ulang di pool (semua item OK) setelah perbaikan — membuka blokir #2/#7. */
+export async function recordOfficeP2H(vehicleId: string) {
+  return run(async () => {
+    const { user } = await guard(a => a.canFleet);
+    const all = { rem: "ok", kemudi: "ok", ban: "ok", lampu: "ok", apar: "ok", wiper: "ok", klakson: "ok", kabin: "ok" };
+    await prisma.preTripCheck.create({ data: { vehicleId, at: new Date().toISOString(), resultJson: JSON.stringify(all), notes: `P2H ulang di pool oleh ${user.name}`, source: "Kantor" } });
+    return vehicleId;
+  });
+}

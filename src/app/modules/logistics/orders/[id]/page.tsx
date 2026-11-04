@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getLogisticsAccess } from "../../server";
 import { rupiah, type PriceLine } from "../../lib";
-import { Card, DocLinks, History, InfoRow, StatusBadge, btnSecondary } from "../../ui";
+import { Card, DocLinks, History, InfoRow, StatusBadge, btnPrimary, btnSecondary } from "../../ui";
 import PriceBreakdown from "../../PriceBreakdown";
 import OrderActions from "./OrderActions";
 
@@ -31,6 +31,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         <div className="flex flex-wrap gap-2">
           <DocLinks kind="charter-quote" id={o.id} label={o.status === "Draft" ? "Penawaran" : "Konfirmasi"} />
           {editable && <Link href={`/modules/logistics/orders/${o.id}/edit`} className={btnSecondary}>Edit</Link>}
+          {access.canDispatch && o.status === "Confirmed" && <Link href={`/modules/logistics/dispatch?order=${o.id}`} className={btnPrimary}>Dispatch (assign truck & driver)</Link>}
           {access.canOrder && <OrderActions id={o.id} status={o.status} />}
         </div>
       </div>

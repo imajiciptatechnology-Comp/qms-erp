@@ -29,6 +29,8 @@ import {
   Tags,
   Users,
   MapPinned,
+  Route,
+  ShieldCheck,
   CalendarClock,
   X
 } from "lucide-react";
@@ -67,6 +69,8 @@ export const LOGISTICS_MENU = [
   { id: "log-fleet", name: "Fleet & Crew", path: "/modules/logistics/fleet", icon: Truck, perm: "logistics" },
   { id: "log-expiring", name: "Expiring Documents", path: "/modules/logistics/fleet/expiring", icon: CalendarClock, perm: "logistics" },
   { id: "log-clients", name: "Clients", path: "/modules/logistics/clients", icon: Users, perm: "logistics" },
+  { id: "log-dispatch", name: "Dispatch", path: "/modules/logistics/dispatch", icon: Route, perm: "logistics" },
+  { id: "log-trips", name: "Trips & Overrides", path: "/modules/logistics/trips", icon: ShieldCheck, perm: "logistics" },
   { id: "log-tracking", name: "Fleet Tracking", path: "/modules/logistics/tracking", icon: MapPinned, perm: "logistics" },
 ];
 
