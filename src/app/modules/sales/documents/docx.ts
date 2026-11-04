@@ -4,17 +4,20 @@ import {
   AlignmentType, BorderStyle, Document, Footer, Header, ImageRun, Packer, PageNumber, Paragraph, ShadingType,
   Table, TableCell, TableRow, TextRun, VerticalAlignTable, WidthType, type IBorderOptions, type ParagraphChild, type TableVerticalAlign,
 } from "docx";
-import { LETTERHEAD as L } from "./letterhead";
-import type { Block, Cell, DocModel, Signature } from "./model";
+import { DEFAULT_BRAND } from "./letterhead";
+import type { Block, Cell, DocBrand, DocModel, Signature } from "./model";
 
-const C = Object.fromEntries(Object.entries(L.colors).map(([k, v]) => [k, v.replace("#", "")])) as Record<keyof typeof L.colors, string>;
 const FONT = "Arial";
 const PAGE_W = 9638; // A4 dikurangi margin 2 cm kiri-kanan, dalam twip
+type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
+
+/** Semua helper dibuat per kop (warna, logo, nama perusahaan). */
+function createDocxKit(L: DocBrand) {
+const C = Object.fromEntries(Object.entries(L.colors).map(([k, v]) => [k, v.replace("#", "")])) as Record<keyof DocBrand["colors"], string>;
 
 const none: IBorderOptions = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
 const noBorders = { top: none, bottom: none, left: none, right: none, insideHorizontal: none, insideVertical: none };
 const thin = (color = C.line): IBorderOptions => ({ style: BorderStyle.SINGLE, size: 4, color });
-type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
 
 const run = (text: string, o: { bold?: boolean; italics?: boolean; size?: number; color?: string; underline?: boolean } = {}) =>
   new TextRun({ text, font: FONT, size: o.size ?? 18, bold: o.bold, italics: o.italics, color: o.color ?? C.text, underline: o.underline ? {} : undefined });
@@ -34,7 +37,7 @@ function cell(children: Paragraph[], o: { width: number; fill?: string; borders?
 const alignOf = (a?: string): Align => (a === "right" ? AlignmentType.RIGHT : a === "center" ? AlignmentType.CENTER : AlignmentType.LEFT);
 
 function letterhead() {
-  const logo = fs.readFileSync(path.join(process.cwd(), "assets", "brand", "lpi-logo.png"));
+  const logo = fs.readFileSync(path.join(process.cwd(), "assets", L.logoFile));
   return new Header({
     children: [
       new Table({
@@ -164,7 +167,7 @@ const WATERMARK_TEXT = {
   DIBATALKAN: "DIBATALKAN — dokumen ini tidak berlaku",
 };
 
-export async function renderDocx(d: DocModel) {
+return async function renderDocx(d: DocModel) {
   const meta = (k: string, v: string) => para([run(k, { color: C.muted }), run(`: ${v}`)], { after: 20 });
   const doc = new Document({
     creator: L.company, title: d.fileName, subject: d.title,
@@ -194,4 +197,9 @@ export async function renderDocx(d: DocModel) {
     }],
   });
   return Packer.toBuffer(doc);
+};
+}
+
+export async function renderDocx(d: DocModel) {
+  return createDocxKit(d.brand ?? DEFAULT_BRAND)(d);
 }

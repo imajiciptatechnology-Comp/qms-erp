@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
 import { Document, Font, Image, Page, StyleSheet, Text, View, renderToBuffer } from "@react-pdf/renderer";
-import { LETTERHEAD as L } from "./letterhead";
-import type { Block, Cell, DocModel, Signature } from "./model";
+import { DEFAULT_BRAND } from "./letterhead";
+import type { Block, Cell, DocBrand, DocModel, Signature } from "./model";
 
 const ASSETS = path.join(process.cwd(), "assets");
 const font = (f: string) => path.join(ASSETS, "fonts", f);
@@ -17,8 +17,9 @@ Font.register({
 });
 // Jangan memenggal kata bahasa Indonesia dengan aturan bahasa Inggris.
 Font.registerHyphenationCallback(word => [word]);
-const LOGO = fs.readFileSync(path.join(ASSETS, "brand", "lpi-logo.png"));
-
+/** Semua gaya & komponen dibuat per kop (warna, logo, nama perusahaan), lalu di-cache. */
+function createPdfKit(L: DocBrand) {
+const LOGO = fs.readFileSync(path.join(ASSETS, L.logoFile));
 const C = L.colors;
 // lineHeight hanya dipasang per teks multi-baris: jika dipasang di Page/View dan ikut diwarisi
 // elemen fixed, footer & nomor halaman tidak tergambar (perilaku react-pdf 4.x).
@@ -200,6 +201,15 @@ function DocPdf({ d }: { d: DocModel }) {
   );
 }
 
+return DocPdf;
+}
+
+const kits = new Map<string, ReturnType<typeof createPdfKit>>();
+
 export function renderPdf(d: DocModel) {
+  const brand = d.brand ?? DEFAULT_BRAND;
+  const key = JSON.stringify(brand);
+  if (!kits.has(key)) kits.set(key, createPdfKit(brand));
+  const DocPdf = kits.get(key)!;
   return renderToBuffer(<DocPdf d={d} />);
 }

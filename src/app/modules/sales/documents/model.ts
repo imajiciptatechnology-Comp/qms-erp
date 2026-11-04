@@ -21,7 +21,17 @@ export type Block =
 
 export type Signature = { lead: string; org?: string; name: string; title: string; extra?: string; stamp?: boolean };
 
+/** Identitas kop & footer. Tanpa brand → kop Labtech (letterhead.ts). Modul Logistik memakai CompanyProfile. */
+export type DocBrand = {
+  company: string; tagline: string; address: string; phone: string; email: string; website: string; npwp: string;
+  colors: { primary: string; accent: string; text: string; muted: string; line: string; soft: string };
+  /** Relatif dari folder assets/, mis. brand/lpi-logo.png */
+  logoFile: string;
+};
+
 export type DocModel = {
+  /** Kop surat perusahaan lain (opsional). */
+  brand?: DocBrand;
   /** Nama file tanpa ekstensi. */
   fileName: string;
   title: string;

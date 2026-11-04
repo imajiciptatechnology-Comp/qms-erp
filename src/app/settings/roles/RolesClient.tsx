@@ -4,6 +4,7 @@ import { ShieldCheck, Users, MoreVertical, Loader2, Key } from "lucide-react";
 import { useState } from "react";
 import { changeUserRole, updateRolePermissions } from "../../actions/auth";
 import { MODULES } from "@/components/layout/Sidebar";
+import { LOG_PRIVILEGES } from "@/app/modules/logistics/lib";
 
 const SPECIAL_PRIVILEGES = [
   { id: "document_approve", label: "Can Approve Documents" },
@@ -11,6 +12,7 @@ const SPECIAL_PRIVILEGES = [
   { id: "sales_manage", label: "Can Create Quotations & Sales Orders" },
   { id: "sales_approve", label: "Can Approve Sales Discounts & Orders" },
   { id: "finance", label: "Can Manage Invoices & Payments" },
+  ...LOG_PRIVILEGES,
 ];
 
 export default function RolesClient({ users, currentUser, initialRolesConfig }: { users: any[], currentUser: any, initialRolesConfig: any[] }) {

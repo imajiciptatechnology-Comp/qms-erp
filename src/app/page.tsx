@@ -10,11 +10,25 @@ import { getDashboardData } from "./dashboard-data";
 import AiInsightsPanel from "@/components/AiInsightsPanel";
 import { getCachedInsights } from "./actions/ai-insights";
 import { isAiConfigured } from "@/lib/ai";
+import { redirect } from "next/navigation";
+import { getCurrentUser, getRolesConfig } from "./actions/auth";
+import { logisticsAccess } from "./modules/logistics/lib";
 
 // Server Action "Generate Analysis" memanggil AI dan bisa butuh puluhan detik.
 export const maxDuration = 60;
 
 export default async function Home() {
+  // Role logistik tanpa akses Dashboard QMS langsung ke modulnya; sopir ke halaman sopir (HP).
+  const me = await getCurrentUser();
+  if (me && me.role !== "Super Admin") {
+    const roles = await getRolesConfig();
+    const perms: string[] = roles.find((r: { name: string }) => r.name === me.role)?.permissions ?? [];
+    const log = logisticsAccess(me, roles);
+    if (!perms.includes("all") && !perms.includes("dashboard")) {
+      if (log.isDriver) redirect("/driver");
+      if (log.canView) redirect("/modules/logistics");
+    }
+  }
   const [{ kpi, charts, recentNCs, recentIncidents, activeMocList }, aiInsights] = await Promise.all([
     getDashboardData(),
     getCachedInsights(),

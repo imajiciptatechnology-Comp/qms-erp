@@ -805,3 +805,245 @@ model Contract {
   signedFileUrl     String?
   renewedFromId     String?
 }
+
+// ---------------------------------------------------------
+// LOGISTIK — TMS truk charter (FTL). Lihat docs/rancangan-ai-modul-shipping.md.
+// Semua tabel baru; modul Shipping lama tidak tersentuh.
+// ---------------------------------------------------------
+
+/// Profil perusahaan untuk kop dokumen (key "logistics" = perusahaan demo logistik).
+model CompanyProfile {
+  id           String  @id @default(cuid())
+  key          String  @unique
+  name         String
+  tagline      String?
+  address      String?
+  city         String?
+  phone        String?
+  email        String?
+  website      String?
+  npwp         String?
+  bank         String?
+  logoPath     String? // relatif dari folder assets/, mis. brand/arunika-logo.png
+  primaryColor String  @default("#0B2545")
+  accentColor  String  @default("#F28C28")
+  signersJson  String  @default("[]") // [{ key, name, title }]
+  updatedAt    String
+}
+
+model TruckType {
+  id             String                @id @default(cuid())
+  code           String                @unique // CDE | CDD | FUSO | TRONTON | TRAILER
+  name           String
+  capacityTon    Float
+  volumeM3       Float
+  kmPerLiter     Float
+  tollClass      Int // 1 = Gol. I, 2 = Gol. II, 3 = Gol. III–V
+  sizeClass      String // small | large (untuk biaya tambahan)
+  requiresHelper Boolean               @default(false)
+  minSim         String // B1 Umum | B2 Umum
+  sortOrder      Int                   @default(0)
+  rates          CharterRate[]
+  vehicles       Vehicle[]
+  orders         CharterOrder[]
+  qualifications DriverQualification[]
+}
+
+model LogisticsRoute {
+  id            String         @id @default(cuid())
+  code          String         @unique // JKT | BDG | ...
+  origin        String
+  destination   String
+  distanceKm    Float
+  durationHours Float
+  toll1         Float // tarif tol sekali jalan Gol. I
+  toll2         Float // Gol. II
+  toll3         Float // Gol. III–V
+  destLat       Float?
+  destLng       Float?
+  isActive      Boolean        @default(true)
+  sortOrder     Int            @default(0)
+  rates         CharterRate[]
+  orders        CharterOrder[]
+}
+
+/// Tarif charter sekali jalan per rute × jenis truk (all-in BBM + tol + sopir, belum PPN).
+model CharterRate {
+  id          String         @id @default(cuid())
+  routeId     String
+  truckTypeId String
+  price       Float
+  updatedBy   String?
+  updatedAt   String?
+  route       LogisticsRoute @relation(fields: [routeId], references: [id])
+  truckType   TruckType      @relation(fields: [truckTypeId], references: [id])
+
+  @@unique([routeId, truckTypeId])
+}
+
+/// Biaya tambahan. kind: flat (Rp) | percent (% nilai barang, minimal minAmount) | discount (% tarif rute).
+model RateSurcharge {
+  id          String  @id @default(cuid())
+  code        String  @unique // EXTRA_DROP | OVERNIGHT | TKBM | ESCORT | INSURANCE | RETURN_LOAD
+  name        String
+  unit        String
+  kind        String  @default("flat")
+  smallAmount Float? // CDE/CDD (null = tidak tersedia)
+  largeAmount Float? // Fuso/Tronton/Trailer
+  percent     Float?
+  minAmount   Float?
+  sortOrder   Int     @default(0)
+  updatedBy   String?
+  updatedAt   String?
+}
+
+model LogisticsClient {
+  id                      String              @id @default(cuid())
+  code                    String              @unique
+  name                    String
+  industry                String?
+  address                 String?
+  city                    String?
+  contactName             String?
+  contactPhone            String?
+  contactEmail            String?
+  paymentTerms            String              @default("30 hari")
+  contractDiscountPercent Float               @default(0)
+  insuranceRequired       Boolean             @default(false)
+  tollPassThrough         Boolean             @default(false)
+  orderPattern            String?
+  aliases                 String? // nama panggilan untuk AI, dipisah koma
+  notes                   String?
+  createdAt               String
+  locations               LogisticsLocation[]
+  orders                  CharterOrder[]
+}
+
+model LogisticsLocation {
+  id       String           @id @default(cuid())
+  clientId String?
+  name     String
+  kind     String // Muat | Bongkar | Pool
+  address  String?
+  city     String
+  lat      Float?
+  lng      Float?
+  client   LogisticsClient? @relation(fields: [clientId], references: [id])
+}
+
+model Vehicle {
+  id                String    @id @default(cuid())
+  plateNo           String    @unique
+  truckTypeId       String
+  brand             String?
+  year              Int?
+  status            String    @default("Ready") // Ready | In Repair | Inactive
+  odometerKm        Float     @default(0)
+  stnkExpiry        String?
+  kirExpiry         String?
+  insuranceExpiry   String?
+  nextServiceDate   String?
+  nextServiceKm     Float?
+  tollMethod        String    @default("A") // A kartu e-toll perusahaan | B tunai | C kartu pribadi sopir
+  tollCardNo        String?
+  preferredDriverId String?
+  notes             String?
+  truckType         TruckType @relation(fields: [truckTypeId], references: [id])
+}
+
+model Driver {
+  id                String                @id @default(cuid())
+  code              String                @unique
+  name              String
+  phone             String?
+  userEmail         String?               @unique // akun login HP sopir
+  simClass          String // B1 Umum | B2 Umum
+  simNo             String?
+  simExpiry         String
+  experienceYears   Float                 @default(0)
+  defensiveTraining Boolean               @default(false)
+  trailerCertified  Boolean               @default(false)
+  status            String                @default("Active")
+  notes             String?
+  qualifications    DriverQualification[]
+}
+
+/// Jenis kendaraan yang boleh dibawa sopir. basis: auto (SIM + training + pengalaman) | manual-add | manual-revoke.
+model DriverQualification {
+  id          String    @id @default(cuid())
+  driverId    String
+  truckTypeId String
+  basis       String    @default("auto")
+  note        String?
+  driver      Driver    @relation(fields: [driverId], references: [id])
+  truckType   TruckType @relation(fields: [truckTypeId], references: [id])
+
+  @@unique([driverId, truckTypeId])
+}
+
+/// Kenek (pool, dicatat per orang; tanpa login).
+model Helper {
+  id                String  @id @default(cuid())
+  code              String  @unique
+  name              String
+  phone             String?
+  idCardNo          String?
+  preferredDriverId String?
+  status            String  @default("Active")
+  notes             String?
+}
+
+model CharterOrder {
+  id              String             @id @default(cuid())
+  orderNo         String             @unique
+  clientId        String
+  routeId         String
+  truckTypeId     String
+  clientRef       String?
+  loadDate        String
+  loadTime        String?
+  originName      String
+  originAddress   String?
+  cargoDesc       String
+  cargoWeightTon  Float?
+  cargoVolumeM3   Float?
+  cargoValue      Float              @default(0)
+  overnightDays   Int                @default(0)
+  tkbm            Boolean            @default(false)
+  escort          Boolean            @default(false)
+  insurance       Boolean            @default(false)
+  returnLoad      Boolean            @default(false)
+  discountPercent Float              @default(0)
+  baseRate        Float              @default(0)
+  surchargeTotal  Float              @default(0)
+  discountAmount  Float              @default(0)
+  subtotal        Float              @default(0)
+  taxPercent      Float              @default(11)
+  taxAmount       Float              @default(0)
+  total           Float              @default(0)
+  breakdownJson   String             @default("[]")
+  status          String             @default("Draft") // Draft | Confirmed | Scheduled | Completed | Cancelled
+  source          String             @default("Manual") // Manual | Teks | Suara
+  aiNote          String?
+  notes           String?
+  trackingToken   String             @unique
+  createdBy       String
+  createdAt       String
+  historyJson     String             @default("[]")
+  client          LogisticsClient    @relation(fields: [clientId], references: [id])
+  route           LogisticsRoute     @relation(fields: [routeId], references: [id])
+  truckType       TruckType          @relation(fields: [truckTypeId], references: [id])
+  stops           CharterOrderStop[]
+}
+
+/// Titik bongkar (urut). Titik ke-2 dst. = multi-drop.
+model CharterOrderStop {
+  id      String       @id @default(cuid())
+  orderId String
+  seq     Int
+  name    String
+  address String?
+  city    String?
+  note    String?
+  order   CharterOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}

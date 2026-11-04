@@ -23,3 +23,6 @@ export const LETTERHEAD = {
   jurisdiction: "Pengadilan Negeri Jakarta Selatan",
   colors: { primary: "#0B3B66", accent: "#14B8A6", text: "#1E293B", muted: "#64748B", line: "#CBD5E1", soft: "#F1F5F9" },
 };
+
+/** Kop default (Labtech) dalam bentuk DocBrand. */
+export const DEFAULT_BRAND = { ...LETTERHEAD, logoFile: "brand/lpi-logo.png" };
