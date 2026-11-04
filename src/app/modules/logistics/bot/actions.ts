@@ -50,10 +50,9 @@ export async function sendDriverMessage(driverId: string, text: string) {
     const body = text.trim();
     if (!body) throw new Error("Pesan kosong.");
     if (body.length > 1000) throw new Error("Pesan terlalu panjang (maks. 1000 karakter).");
-    if (!isTelegramConfigured()) throw new Error("Bot Telegram belum dikonfigurasi.");
     const trip = await prisma.trip.findFirst({ where: { driverId, isSimulated: false, status: { notIn: ["Completed", "Cancelled"] } }, select: { id: true } });
     const sent = await sendToDriver(driverId, `📣 Pesan dari kantor (${user.name}):\n${body}`, { sentBy: user.name, tripId: trip?.id });
-    if (!sent) throw new Error("Sopir ini belum menghubungkan Telegram.");
+    if (!sent) throw new Error("Sopir ini belum terhubung (Telegram / Driver simulator).");
     return { ok: true as const };
   } catch (err) { return fail(err); }
 }
@@ -73,9 +72,10 @@ export async function startLiveTrip(input: { driverId: string; vehicleId: string
   try {
     const user = await guard(a => a.canDispatch);
     const { trip, vehicle, route, order, stopNames } = await createLiveTrip(input, user.name);
-    const notified = isTelegramConfigured() ? await sendToDriver(input.driverId,
+    // Kanal Telegram & Driver simulator; sendToDriver melewati kanal yang gagal.
+    const notified = await sendToDriver(input.driverId,
       `🆕 Tugas baru ${trip.tripNo}\n${vehicle.plateNo} · ${route.origin} → ${route.destination}${order ? `\nMuat: ${order.originName} · ${order.loadDate} ${order.loadTime ?? ""}` : ""}\nBongkar: ${stopNames.join("; ")}\n\nIsi ✅ P2H dulu, lalu tekan 🚚 Berangkat.`,
-      { sentBy: user.name, tripId: trip.id, inline: [[{ text: "📋 Lihat tugas", callback_data: "task" }]] }).catch(() => false) : false;
+      { sentBy: user.name, tripId: trip.id, inline: [[{ text: "📋 Lihat tugas", callback_data: "task" }]] }).catch(() => false);
     revalidatePath("/modules/logistics/tracking");
     return { ok: true as const, tripNo: trip.tripNo, notified };
   } catch (err) { return fail(err); }

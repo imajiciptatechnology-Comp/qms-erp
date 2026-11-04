@@ -3,7 +3,7 @@
 import { prisma } from "@/lib/prisma";
 import { AiError, aiTranscribeAudio, isAiConfigured } from "@/lib/ai";
 import { getJson, setJson } from "@/lib/kvStore";
-import { downloadFile, sendMessage, tg, type InlineButton } from "@/lib/telegram";
+import { downloadFile as tgDownload, sendMessage as tgSend, tg as tgApi, type InlineButton } from "@/lib/telegram";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES, today } from "../lib";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, haversineKm } from "../trackingLib";
@@ -15,7 +15,7 @@ import { analyzeDriverPhoto, interpretDriverText, parseP2HText } from "./ai";
 // ---------- Tipe update Telegram (yang dipakai saja) ----------
 type TgUser = { id: number; username?: string; first_name?: string; last_name?: string };
 type TgMessage = {
-  message_id: number; chat: { id: number; type: string }; from?: TgUser; date: number; text?: string; caption?: string;
+  message_id: number; chat: { id: number | string; type: string }; from?: TgUser; date: number; text?: string; caption?: string;
   photo?: { file_id: string; width: number; height: number; file_size?: number }[];
   voice?: { file_id: string; duration: number; mime_type?: string; file_size?: number };
   audio?: { file_id: string; mime_type?: string };
@@ -41,15 +41,31 @@ const HELP = [
 ].join("\n");
 
 const DAILY_AI_LIMIT = 40;
+
+/** Chat dari Driver simulator di browser (demo tanpa HP): "sim-<driverId>". Tidak ada panggilan ke Telegram. */
+export const isSimChat = (chatId: string) => chatId.startsWith("sim-");
+const sendMessage = (chatId: string, text: string, opts: { inline?: InlineButton[][]; keyboard?: unknown } = {}) =>
+  isSimChat(chatId) ? Promise.resolve({ message_id: 0 }) : tgSend(chatId, text, opts);
+const chatAction = (chatId: string) => (isSimChat(chatId) ? Promise.resolve() : tgApi("sendChatAction", { chat_id: chatId, action: "typing" }).then(() => undefined));
+const ackCallback = (chatId: string, id: string, text?: string) => (isSimChat(chatId) ? Promise.resolve() : tgApi("answerCallbackQuery", { callback_query_id: id, ...(text ? { text } : {}) }).then(() => undefined));
+/** File dari simulator sudah ada di storage: fileId "url:<publicUrl>". */
+async function downloadFile(fileId: string) {
+  if (fileId.startsWith("url:")) {
+    const res = await fetch(fileId.slice(4), { signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) throw new Error(`Gagal mengunduh file (${res.status}).`);
+    return { bytes: Buffer.from(await res.arrayBuffer()), path: fileId.slice(4) };
+  }
+  return tgDownload(fileId);
+}
 const nowIso = () => new Date().toISOString();
 
 async function log(data: { chatId: string; driverId?: string | null; tripId?: string | null; direction: "in" | "out"; kind: string; text?: string | null; fileUrl?: string | null; aiJson?: string | null; sentBy?: string | null }) {
-  await prisma.chatMessage.create({ data: { channel: "telegram", ...data, at: nowIso() } }).catch(err => console.error("[bot] log", err));
+  await prisma.chatMessage.create({ data: { channel: isSimChat(data.chatId) ? "simulator" : "telegram", ...data, at: nowIso() } }).catch(err => console.error("[bot] log", err));
 }
 
 async function reply(chatId: string, ctx: { driverId?: string; tripId?: string | null }, text: string, opts: { inline?: InlineButton[][]; keyboard?: unknown } = {}) {
   await sendMessage(chatId, text, opts.inline?.length === 0 ? { ...opts, inline: undefined } : opts);
-  await log({ chatId, driverId: ctx.driverId, tripId: ctx.tripId, direction: "out", kind: "text", text, sentBy: "Bot" });
+  await log({ chatId, driverId: ctx.driverId, tripId: ctx.tripId, direction: "out", kind: "text", text, sentBy: "Bot", aiJson: opts.inline?.length ? JSON.stringify({ buttons: opts.inline }) : null });
 }
 
 async function aiQuotaOk(driverId: string) {
@@ -63,7 +79,7 @@ async function aiQuotaOk(driverId: string) {
 type Ctx = Awaited<ReturnType<typeof loadContext>>;
 
 async function loadContext(chatId: string) {
-  const link = await prisma.chatChannelLink.findFirst({ where: { channel: "telegram", chatId, active: true }, include: { driver: true } });
+  const link = await prisma.chatChannelLink.findFirst({ where: { chatId, active: true }, include: { driver: true } });
   if (!link) return null;
   const trip = await prisma.trip.findFirst({
     where: { driverId: link.driverId, isSimulated: false, status: { in: ACTIVE_TRIP_STATUSES } }, orderBy: { plannedStart: "asc" },
@@ -124,7 +140,7 @@ export async function handleTelegramUpdate(update: TgUpdate) {
 
   const c = await loadContext(chatId);
   if (!c) {
-    if (cb) await tg("answerCallbackQuery", { callback_query_id: cb.id }).catch(() => {});
+    if (cb) await ackCallback(chatId, cb.id).catch(() => {});
     if (!update.edited_message) await sendMessage(chatId, "Maaf, akun Telegram ini belum terhubung ke data sopir PT Arunika Trans Nusantara. Minta link undangan ke Fleet Manager.");
     return;
   }
@@ -169,7 +185,7 @@ async function linkChat(chatId: string, code: string, from?: TgUser) {
   }
   // Satu akun Telegram hanya untuk satu sopir; link lama sopir ini dinonaktifkan.
   await prisma.chatChannelLink.updateMany({ where: { channel: "telegram", chatId, NOT: { id: link.id } }, data: { chatId: null, active: false } });
-  await prisma.chatChannelLink.updateMany({ where: { driverId: link.driverId, NOT: { id: link.id } }, data: { active: false } });
+  await prisma.chatChannelLink.updateMany({ where: { channel: "telegram", driverId: link.driverId, NOT: { id: link.id } }, data: { active: false } });
   await prisma.chatChannelLink.update({ where: { id: link.id }, data: {
     chatId, linkedAt: nowIso(), chatUsername: from?.username ?? null, chatName: [from?.first_name, from?.last_name].filter(Boolean).join(" ") || null,
   } });
@@ -192,7 +208,7 @@ async function saveLocation(c: NonNullable<Ctx>, lat: number, lng: number, headi
 
 async function handleCallback(c: NonNullable<Ctx>, chatId: string, cbId: string, data: string) {
   const ctx = { driverId: c.driver.id, tripId: c.trip?.id ?? null };
-  const answer = (text?: string) => tg("answerCallbackQuery", { callback_query_id: cbId, ...(text ? { text } : {}) }).catch(() => {});
+  const answer = (text?: string) => ackCallback(chatId, cbId, text).catch(() => {});
   const [kind, tripId, to] = data.split(":");
   if (kind === "task") { await answer(); return reply(chatId, ctx, tripText(c), { inline: await tripButtons(c) }); }
   if (!c.trip || c.trip.id !== tripId) { await answer("Trip ini sudah tidak aktif."); return; }
@@ -280,13 +296,13 @@ async function handleVoice(c: NonNullable<Ctx>, chatId: string, fileId: string, 
   const ctx = { driverId: c.driver.id, tripId: c.trip?.id ?? null };
   if (!isAiConfigured()) return reply(chatId, ctx, "Voice note belum bisa dibaca (AI belum aktif). Silakan ketik pesannya.");
   if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Silakan ketik atau pakai tombol menu.");
-  await tg("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
+  await chatAction(chatId).catch(() => {});
   try {
     const { bytes } = await downloadFile(fileId);
     const { text, model, via } = await aiTranscribeAudio(bytes.toString("base64"), mime.includes("ogg") || !mime ? "audio/ogg" : mime);
     await log({ chatId, ...ctx, direction: "in", kind: "voice", text: text || "(tidak ada ucapan)", aiJson: JSON.stringify({ model, via }) });
     if (!text) return reply(chatId, ctx, "Maaf, suaranya tidak terdengar jelas. Coba ulangi atau ketik pesannya.");
-    await sendMessage(chatId, `🎤 Saya dengar: "${text.slice(0, 500)}"`);
+    await reply(chatId, ctx, `🎤 Saya dengar: "${text.slice(0, 500)}"`);
     return handleFreeText(c, chatId, text, "voice");
   } catch (err) {
     console.error("[bot] voice", err);
@@ -301,11 +317,11 @@ async function handlePhoto(c: NonNullable<Ctx>, chatId: string, m: TgMessage) {
   let fileUrl: string | null = null;
   try {
     const { bytes } = await downloadFile(photo.file_id);
-    const file = new File([new Uint8Array(bytes)], `tg-${Date.now()}.jpg`, { type: "image/jpeg" });
-    fileUrl = await uploadToStorage(`logistics/telegram/${c.driver.id}`, file);
+    fileUrl = photo.file_id.startsWith("url:") ? photo.file_id.slice(4)
+      : await uploadToStorage(`logistics/telegram/${c.driver.id}`, new File([new Uint8Array(bytes)], `tg-${Date.now()}.jpg`, { type: "image/jpeg" }));
     await log({ chatId, ...ctx, direction: "in", kind: "photo", text: m.caption ?? null, fileUrl });
     if (!isAiConfigured() || !(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "📷 Foto diterima dan disimpan. Terima kasih, Pak.");
-    await tg("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
+    await chatAction(chatId).catch(() => {});
     const dataUrl = `data:image/jpeg;base64,${bytes.toString("base64")}`;
     const tripInfo = c.trip ? `${c.trip.vehicle.plateNo}, status ${TRIP_STATUSES[c.trip.status]?.label}, ${c.trip.route?.destination ?? ""}` : "no active trip";
     const a = await analyzeDriverPhoto(dataUrl, tripInfo + (m.caption ? `. Caption: ${m.caption}` : ""));
@@ -352,9 +368,16 @@ async function handleDocumentPhoto(c: NonNullable<Ctx>, chatId: string, dataUrl:
 
 /** Kirim pesan ke sopir lewat bot (pesan kantor, pengingat SIM, tugas baru). */
 export async function sendToDriver(driverId: string, text: string, opts: { sentBy?: string; tripId?: string | null; inline?: InlineButton[][] } = {}) {
-  const link = await prisma.chatChannelLink.findFirst({ where: { driverId, active: true, chatId: { not: null } } });
-  if (!link?.chatId) return false;
-  await sendMessage(link.chatId, text, { inline: opts.inline });
-  await log({ chatId: link.chatId, driverId, tripId: opts.tripId ?? null, direction: "out", kind: "text", text, sentBy: opts.sentBy ?? "Bot" });
-  return true;
+  const links = await prisma.chatChannelLink.findMany({ where: { driverId, active: true, chatId: { not: null } } });
+  let sent = false;
+  for (const link of links) {
+    try {
+      await sendMessage(link.chatId!, text, { inline: opts.inline });
+      await log({ chatId: link.chatId!, driverId, tripId: opts.tripId ?? null, direction: "out", kind: "text", text, sentBy: opts.sentBy ?? "Bot", aiJson: opts.inline?.length ? JSON.stringify({ buttons: opts.inline }) : null });
+      sent = true;
+    } catch (err) {
+      console.error("[bot] sendToDriver", err);
+    }
+  }
+  return sent;
 }

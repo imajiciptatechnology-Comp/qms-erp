@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
-import { AlertTriangle, Copy, Loader2, MapPin, Play, RefreshCw, Sparkles, Square, Truck, Wrench, X } from "lucide-react";
+import { AlertTriangle, Copy, Loader2, MapPin, Play, RefreshCw, Smartphone, Sparkles, Square, Truck, Wrench, X } from "lucide-react";
 import { Card, StatCard, btnPrimary, btnSecondary } from "../ui";
 import { TRIP_STATUSES } from "../trackingLib";
 import type { DeployedUnit, FleetSnapshot } from "../tracking";
@@ -80,6 +80,7 @@ export default function FleetTracking({ initial, canSimulate, chatSlot }: { init
             <button type="button" disabled={summaryBusy} onClick={() => startSummary(async () => { const r = await aiFleetSummary(); if (r.ok) setSummary({ text: r.text, model: r.model }); else setError(r.error); })} className={btnSecondary}>
               {summaryBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-indigo-600" />} AI fleet summary
             </button>
+            {canSimulate && <Link href="/modules/logistics/tracking/simulator" className={btnSecondary}><Smartphone className="w-4 h-4 text-sky-600" /> Driver simulator</Link>}
             {canSimulate && (
               <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1">
                 <label className="text-xs text-slate-600 flex items-center gap-1">Speed
