@@ -21,7 +21,26 @@ function dataUrlToFile(dataUrl: string, name: string) {
   return new File([bytes], name.replace(/\.[^.]+$/, "") + ".jpg", { type: mime });
 }
 
-/** File + tombol scan AI. Foto dikecilkan di browser sebelum diunggah/di-scan. */
+/** Halaman pertama PDF → JPEG (untuk scan AI). PDF aslinya tetap yang disimpan. */
+async function pdfFirstPageToJpeg(file: File): Promise<string> {
+  const pdfjs = await import("pdfjs-dist");
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const page = await doc.getPage(1);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: Math.min(2.5, 1600 / Math.max(base.width, base.height)) });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(viewport.width);
+  canvas.height = Math.round(viewport.height);
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  await doc.destroy();
+  return canvas.toDataURL("image/jpeg", 0.85);
+}
+
+/** File + tombol scan AI. Foto dikecilkan di browser sebelum diunggah/di-scan; PDF di-scan dari halaman pertama. */
 function useFilePick() {
   const [file, setFile] = useState<File | null>(null);
   const [dataUrl, setDataUrl] = useState<string | null>(null);
@@ -40,9 +59,14 @@ function useFilePick() {
         setFileError("Gagal membaca foto. Coba file lain.");
       }
     } else if (f.type === "application/pdf") {
-      if (f.size > 4 * 1024 * 1024) setFileError("PDF maks. 4 MB.");
-      else setFile(f);
-    } else setFileError("Pilih foto (JPG/PNG) atau PDF.");
+      if (f.size > 4 * 1024 * 1024) { setFileError("PDF maks. 4 MB."); return; }
+      setFile(f);
+      try {
+        setDataUrl(await pdfFirstPageToJpeg(f));
+      } catch {
+        setFileError("PDF tersimpan, tapi halaman pertamanya tidak bisa dibaca untuk scan AI. Isi manual atau pakai foto.");
+      }
+    } else setFileError("Pilih foto (JPG/PNG) atau PDF. Foto HEIC dari iPhone: ubah ke JPG dulu.");
   }
   return { file, dataUrl, fileError, pick };
 }
@@ -53,10 +77,13 @@ const emptyScan: ScanState = { loading: false, error: null, note: null, warn: []
 function ScanPanel({ scan, onScan, canScan, onClear }: { scan: ScanState; onScan: () => void; canScan: boolean; onClear: () => void }) {
   return (
     <div className="space-y-2">
-      <button type="button" onClick={onScan} disabled={!canScan || scan.loading} className={btnSecondary} title={canScan ? "" : "Pilih foto dokumen dulu (PDF diisi manual)"}>
-        {scan.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4 text-blue-600" />}
-        {scan.loading ? "Membaca dokumen…" : "Scan with AI"}
-      </button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={onScan} disabled={!canScan || scan.loading} className={btnSecondary}>
+          {scan.loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanLine className="w-4 h-4 text-blue-600" />}
+          {scan.loading ? "Membaca dokumen…" : "Scan with AI"}
+        </button>
+        <span className="text-xs text-slate-500">{scan.loading ? "AI gratis biasanya butuh 10–40 detik — jangan tutup form." : canScan ? "Field yang terbaca ditandai biru." : "Pilih foto/PDF dokumen dulu, lalu tekan Scan."}</span>
+      </div>
       {scan.error && <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-2.5 py-1.5">{scan.error}</p>}
       {scan.note && (
         <div role="status" className="text-xs bg-white border border-slate-200 rounded-lg px-2.5 py-2 space-y-1">

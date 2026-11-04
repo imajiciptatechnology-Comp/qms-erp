@@ -9,7 +9,7 @@ import { saveDriver, saveHelper, saveVehicle } from "./masterActions";
 
 type Opt = { id: string; label: string };
 
-function Shell({ title, editing, children, onSubmit, pending, error, onClose }: { title: string; editing: boolean; children: React.ReactNode; onSubmit: (fd: FormData) => void; pending: boolean; error: string | null; onClose: () => void }) {
+export function Shell({ title, editing, children, onSubmit, pending, error, onClose }: { title: string; editing: boolean; children: React.ReactNode; onSubmit: (fd: FormData) => void; pending: boolean; error: string | null; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-50 bg-black/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label={title} onKeyDown={e => { if (e.key === "Escape") onClose(); }}>
     <form onSubmit={e => { e.preventDefault(); onSubmit(new FormData(e.currentTarget)); }} className="w-full max-w-3xl rounded-xl border border-slate-200 bg-white shadow-xl p-5 space-y-4 text-left my-8">
@@ -28,7 +28,7 @@ function Shell({ title, editing, children, onSubmit, pending, error, onClose }: 
   );
 }
 
-const F = ({ label, children, span }: { label: string; children: React.ReactNode; span?: string }) => <label className={`block ${span ?? ""}`}><span className={labelCls}>{label}</span>{children}</label>;
+export const F = ({ label, children, span }: { label: string; children: React.ReactNode; span?: string }) => <label className={`block ${span ?? ""}`}><span className={labelCls}>{label}</span>{children}</label>;
 
 export type VehicleInitial = {
   id: string; plateNo: string; truckTypeId: string; brand: string | null; year: number | null; status: string; odometerKm: number;

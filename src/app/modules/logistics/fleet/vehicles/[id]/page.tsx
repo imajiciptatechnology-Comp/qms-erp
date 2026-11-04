@@ -133,3 +133,6 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
     </div>
   );
 }
+
+/** Scan AI (server action di halaman ini) bisa 10–40 detik di AI gratis. */
+export const maxDuration = 60;
