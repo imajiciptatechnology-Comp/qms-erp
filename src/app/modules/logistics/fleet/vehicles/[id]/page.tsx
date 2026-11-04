@@ -8,6 +8,7 @@ import { Card, InfoRow } from "../../../ui";
 import { DocTable, Tabs } from "../../DocTable";
 import { AddDocumentForm, AddServiceForm } from "../../DocumentForms";
 import { CloseServiceButton, OfficeP2HButton } from "../../FleetButtons";
+import { VehicleForm } from "../../MasterForms";
 import { LEVEL_LABEL, vehicleConditions } from "../../../dispatchRules";
 
 function Flags({ flags }: { flags: Flag[] }) {
@@ -41,6 +42,8 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
         <h2 className="text-xl font-bold text-slate-800">{v.plateNo}</h2>
         <span className="text-sm text-slate-500">{v.truckType.name} · {v.brand} · {v.year}</span>
         <Flags flags={flags} />
+        {access.canFleet && <span className="ml-auto"><VehicleForm types={(await prisma.truckType.findMany({ orderBy: { sortOrder: "asc" } })).map(t => ({ id: t.id, label: `${t.name} (${t.capacityTon} ton)` }))}
+          initial={{ id: v.id, plateNo: v.plateNo, truckTypeId: v.truckTypeId, brand: v.brand, year: v.year, status: v.status, odometerKm: v.odometerKm, stnkExpiry: v.stnkExpiry, pkbExpiry: v.pkbExpiry, kirExpiry: v.kirExpiry, insuranceExpiry: v.insuranceExpiry, nextServiceDate: v.nextServiceDate, nextServiceKm: v.nextServiceKm, tollMethod: v.tollMethod, tollCardNo: v.tollCardNo, notes: v.notes }} /></span>}
       </div>
       <Tabs base={base} tab={tab} items={[{ id: "overview", label: "Overview" }, { id: "documents", label: "Documents", count: v.documents.length }, { id: "service", label: "Service history", count: v.services.length }]} />
 

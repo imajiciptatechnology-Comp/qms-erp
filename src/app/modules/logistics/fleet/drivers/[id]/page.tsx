@@ -9,6 +9,7 @@ import { DocTable, Tabs } from "../../DocTable";
 import { AddDocumentForm } from "../../DocumentForms";
 import { isTelegramConfigured } from "@/lib/telegram";
 import TelegramConnect from "../../../bot/TelegramConnect";
+import { DriverForm } from "../../MasterForms";
 
 export default async function DriverDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
   const { access } = await getLogisticsAccess();
@@ -36,6 +37,7 @@ export default async function DriverDetail({ params, searchParams }: { params: P
         <h2 className="text-xl font-bold text-slate-800">{d.name}</h2>
         <span className="text-sm text-slate-500">{d.code} · {d.phone}</span>
         {flags.map(f => <span key={f.text} className={`text-xs px-2 py-0.5 rounded-full border ${f.level === "red" ? "bg-red-50 text-red-700 border-red-200" : "bg-amber-50 text-amber-800 border-amber-200"}`}>{f.text}</span>)}
+        {access.canFleet && <span className="ml-auto"><DriverForm initial={{ id: d.id, name: d.name, phone: d.phone, simClass: d.simClass, simNo: d.simNo, simExpiry: d.simExpiry, experienceYears: d.experienceYears, defensiveTraining: d.defensiveTraining, trailerCertified: d.trailerCertified, status: d.status, notes: d.notes }} /></span>}
       </div>
       <Tabs base={base} tab={tab} items={[{ id: "overview", label: "Overview" }, { id: "documents", label: "Documents", count: d.documents.length }]} />
 

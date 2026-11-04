@@ -49,6 +49,8 @@ export function vehicleConditions(v: VehicleInput, now = today()): Condition[] {
   const docs: [string, string | null][] = [["STNK", v.stnkExpiry], ["Pajak kendaraan (PKB)", v.pkbExpiry], ["KIR", v.kirExpiry]];
   for (const [label, d] of docs) {
     if (d && d < now) out.push({ key: `5:${label}`, code: "5", subject: "vehicle", level: "fleet", needsEvidence: true, text: `${label} kedaluwarsa sejak ${d}` });
+    // Truk baru yang datanya belum dilengkapi: anggap belum terbukti sah.
+    else if (!d) out.push({ key: `5:${label}`, code: "5", subject: "vehicle", level: "fleet", needsEvidence: true, text: `${label} belum dicatat (lengkapi di tab Documents)` });
   }
 
   const daysOver = v.nextServiceDate && v.nextServiceDate < now ? daysBetween(v.nextServiceDate, now) : 0;

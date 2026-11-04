@@ -31,16 +31,31 @@ function CondList({ items, warnings }: { items: Condition[]; warnings?: string[]
   );
 }
 
-function Picker({ title, items, value, onChange, allowNone }: { title: string; items: Candidate[]; value: string; onChange: (id: string) => void; allowNone?: string }) {
+function Picker({ title, items, value, onChange, allowNone, readyFirst }: { title: string; items: Candidate[]; value: string; onChange: (id: string) => void; allowNone?: string; readyFirst?: boolean }) {
+  const isReady = (c: Candidate) => !c.busy && c.state === "ready";
+  const readyCount = items.filter(isReady).length;
+  const [showAll, setShowAll] = useState(!readyFirst || readyCount === 0);
+  const shown = showAll ? items : items.filter(c => isReady(c) || c.id === value);
+  const counts = { ready: readyCount, attention: items.filter(c => !c.busy && c.state === "attention").length, unfit: items.filter(c => !c.busy && c.state === "unfit").length, busy: items.filter(c => c.busy).length };
   return (
-    <Card title={title}>
+    <Card title={title} actions={readyFirst ? (
+      <button type="button" onClick={() => setShowAll(v => !v)} className="text-xs font-medium text-blue-700 hover:underline whitespace-nowrap">
+        {showAll ? `Ready only (${readyCount})` : `Show all (${items.length})`}
+      </button>
+    ) : null}>
+      {readyFirst && (
+        <p className="text-xs text-slate-500 mb-2">
+          <span className="text-emerald-700 font-semibold">{counts.ready} siap pakai</span> · {counts.attention} perlu override · {counts.unfit} tidak layak{counts.busy ? ` · ${counts.busy} sedang trip` : ""}
+          {readyCount === 0 && " — tidak ada yang siap; pilih yang bisa di-override."}
+        </p>
+      )}
       <div className="space-y-1.5 max-h-[420px] overflow-y-auto -mr-2 pr-2" role="radiogroup" aria-label={title}>
         {allowNone && (
           <label className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer ${value === "" ? "border-blue-300 bg-blue-50" : "border-slate-200 hover:bg-slate-50"}`}>
             <input type="radio" checked={value === ""} onChange={() => onChange("")} className="mt-1" /> <span className="text-sm text-slate-600">{allowNone}</span>
           </label>
         )}
-        {items.map(c => {
+        {shown.map(c => {
           const disabled = c.busy || c.state === "unfit";
           return (
             <label key={c.id} className={`flex items-start gap-2 rounded-lg border px-3 py-2 ${disabled ? "opacity-60 cursor-not-allowed border-slate-100" : "cursor-pointer"} ${value === c.id ? "border-blue-300 bg-blue-50" : !disabled ? "border-slate-200 hover:bg-slate-50" : ""}`}>
@@ -99,8 +114,8 @@ export default function DispatchBoard({ order, trucks, drivers, helpers, canDisp
       </Card>
 
       <div className="grid grid-cols-1 2xl:grid-cols-3 gap-6">
-        <Picker title={`Trucks — ${order.truckType}`} items={trucks} value={truck} onChange={setTruck} />
-        <Picker title="Drivers" items={drivers} value={driver} onChange={id => { setDriver(id); setAck(false); if (order.requiresHelper) setHelper(preferred(id)); }} />
+        <Picker title={`Trucks — ${order.truckType}`} items={trucks} value={truck} onChange={setTruck} readyFirst />
+        <Picker title="Drivers" readyFirst items={drivers} value={driver} onChange={id => { setDriver(id); setAck(false); if (order.requiresHelper) setHelper(preferred(id)); }} />
         <Picker title="Helper (kenek)" items={helpers} value={helper} onChange={setHelper} allowNone={order.requiresHelper ? "Tanpa kenek (butuh override Ops)" : "Tanpa kenek"} />
       </div>
 

@@ -144,7 +144,7 @@ const LOCATIONS = [
   { id: "LOC-EPI-SBY", client: "EPI", name: "Gudang EPI Surabaya", kind: "Bongkar", city: "Surabaya", lat: -7.3305, lng: 112.7270 },
 ];
 
-// ---------- Armada 10 truk (+ skenario kelayakan) ----------
+// ---------- Armada 15 truk (+ skenario kelayakan) ----------
 const VEHICLES = [
   { id: "VH-01", pkb: 140, plateNo: "B 9101 FXA", type: "CDE", brand: "Mitsubishi Colt Diesel", year: 2021, odometerKm: 182000, stnk: 220, kir: 95, svcDate: 40, svcKm: 190000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0001" },
   { id: "VH-02", pkb: 75, plateNo: "B 9102 FXA", type: "CDE", brand: "Isuzu Elf", year: 2022, odometerKm: 131000, stnk: 300, kir: 120, svcDate: 25, svcKm: 140000, tollMethod: "B", notes: "Skenario demo: P2H gagal pada rem (kritis) — tidak boleh jalan." },
@@ -156,6 +156,12 @@ const VEHICLES = [
   { id: "VH-08", pkb: 230, plateNo: "B 9408 FXD", type: "TRONTON", brand: "Hino Ranger FL", year: 2022, odometerKm: 156000, stnk: 330, kir: 110, svcDate: 35, svcKm: 165000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0008" },
   { id: "VH-09", pkb: 95, plateNo: "B 9409 FXD", type: "TRONTON", brand: "Isuzu Giga", year: 2023, odometerKm: 74000, stnk: 500, kir: 160, svcDate: 60, svcKm: 85000, tollMethod: "B" },
   { id: "VH-10", pkb: 180, plateNo: "B 9510 FXE", type: "TRAILER", brand: "Hino 700 + Trailer 40 ft", year: 2021, odometerKm: 268000, stnk: 210, kir: 85, svcDate: 28, svcKm: 280000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0010" },
+  // Unit tambahan yang semuanya siap pakai (dokumen berlaku, servis belum jatuh tempo, P2H bersih).
+  { id: "VH-11", pkb: 210, plateNo: "B 9111 FXG", type: "CDE", brand: "Isuzu Elf NLR", year: 2024, odometerKm: 41000, stnk: 900, kir: 140, svcDate: 55, svcKm: 50000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0011" },
+  { id: "VH-12", pkb: 260, plateNo: "B 9212 FXG", type: "CDD", brand: "Mitsubishi Canter FE 74", year: 2024, odometerKm: 52000, stnk: 950, kir: 120, svcDate: 45, svcKm: 60000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0012" },
+  { id: "VH-13", pkb: 300, plateNo: "B 9213 FXG", type: "CDD", brand: "Hino Dutro 130 MDL", year: 2023, odometerKm: 67000, stnk: 820, kir: 100, svcDate: 70, svcKm: 75000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0013" },
+  { id: "VH-14", pkb: 330, plateNo: "B 9314 FXG", type: "FUSO", brand: "Mitsubishi Fuso Fighter X", year: 2024, odometerKm: 58000, stnk: 980, kir: 150, svcDate: 60, svcKm: 65000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0014" },
+  { id: "VH-15", pkb: 280, plateNo: "B 9515 FXG", type: "TRAILER", brand: "Hino 700 + Trailer 40 ft", year: 2023, odometerKm: 121000, stnk: 760, kir: 130, svcDate: 40, svcKm: 130000, tollMethod: "A", tollCardNo: "E-TOLL 6032-0015" },
 ];
 
 // ---------- Sopir 12 orang ----------

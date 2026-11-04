@@ -7,6 +7,7 @@ import { getLogisticsAccess } from "../server";
 import { TOLL_METHODS, driverFlags, vehicleFlags, type Flag } from "../lib";
 import { vehicleConditions, vehicleRuleInclude } from "../dispatchRules";
 import { Card, btnSecondary } from "../ui";
+import { DriverForm, HelperForm, VehicleForm } from "./MasterForms";
 
 function Flags({ flags, ok = "Siap" }: { flags: Flag[]; ok?: string }) {
   if (flags.length === 0) return <span className="text-xs px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">{ok}</span>;
@@ -37,11 +38,13 @@ export default async function FleetPage() {
     prisma.truckType.findMany({ orderBy: { sortOrder: "asc" } }),
   ]);
   const driverName = new Map(drivers.map(d => [d.id, d.name]));
+  const driverOptions = drivers.filter(d => d.status === "Active").map(d => ({ id: d.id, label: `${d.name} (${d.code})` }));
   after(() => maybeRunFleetReminders());
 
   return (
     <div className="space-y-6">
       <Card title={`Trucks (${vehicles.length})`} actions={<Link href="/modules/logistics/fleet/expiring" className={btnSecondary}><CalendarClock className="w-4 h-4" /> Expiring documents</Link>}>
+        {access.canFleet && <div className="mb-4"><VehicleForm types={types.map(t => ({ id: t.id, label: `${t.name} (${t.capacityTon} ton)` }))} /></div>}
         <div className="overflow-x-auto -mx-5">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 bg-slate-50">
@@ -69,6 +72,7 @@ export default async function FleetPage() {
       </Card>
 
       <Card title={`Driver pool (${drivers.length}) — cross vehicle type`}>
+        {access.canFleet && <div className="mb-4"><DriverForm /></div>}
         <div className="overflow-x-auto -mx-5">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 bg-slate-50">
@@ -103,6 +107,7 @@ export default async function FleetPage() {
       </Card>
 
       <Card title={`Helper (kenek) pool (${helpers.length})`}>
+        {access.canFleet && <div className="mb-4"><HelperForm drivers={driverOptions} /></div>}
         <div className="overflow-x-auto -mx-5">
           <table className="w-full text-sm">
             <thead className="text-xs uppercase text-slate-500 bg-slate-50">
@@ -116,7 +121,7 @@ export default async function FleetPage() {
                   <td className={td}>{h.phone}</td>
                   <td className={`${td} tabular-nums`}>{h.idCardNo}</td>
                   <td className={td}>{h.preferredDriverId ? driverName.get(h.preferredDriverId) : <span className="text-slate-400">—</span>}</td>
-                  <td className={td}>{h.status}</td>
+                  <td className={td}><span className="flex items-center gap-2">{h.status}{access.canFleet && <HelperForm drivers={driverOptions} initial={{ id: h.id, name: h.name, phone: h.phone, idCardNo: h.idCardNo, preferredDriverId: h.preferredDriverId, status: h.status, notes: h.notes }} />}</span></td>
                 </tr>
               ))}
             </tbody>
