@@ -1,5 +1,6 @@
 "use server";
 
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { AiError, aiComplete, isAiConfigured } from "@/lib/ai";
 import { uploadToStorage } from "@/lib/uploadFile";
@@ -23,6 +24,11 @@ export async function assignTrip(input: { orderId: string; vehicleId: string; dr
     }
     // Tanpa kondisi blokir → Surat Jalan langsung terbit.
     if (!conditions.length) await issueSuratJalan(trip.id, user.name);
+    // Sopir langsung dikabari tugas baru lewat bot (setelah respons, supaya papan Dispatch tidak menunggu Telegram).
+    after(async () => {
+      const { notifyDriverNewTrip } = await import("../bot/driverNotify");
+      await notifyDriverNewTrip(trip.id, user.name).catch(err => console.error("[dispatch] notify driver", err));
+    });
     return trip.id;
   });
 }
@@ -69,11 +75,10 @@ export async function issueSj(tripId: string) {
   return run(async () => {
     const { user } = await guard(a => a.canDispatch);
     await issueSuratJalan(tripId, user.name);
-    const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, include: { vehicle: true } });
-    try {
-      const { sendToDriver } = await import("../bot/telegramBot");
-      await sendToDriver(trip.driverId, `📄 Surat Jalan ${trip.suratJalanNo} untuk ${trip.vehicle.plateNo} sudah terbit. Isi ✅ P2H, lalu tekan 🚚 Berangkat.`, { tripId, inline: [[{ text: "📋 Lihat tugas", callback_data: "task" }]] });
-    } catch { /* bot opsional */ }
+    after(async () => {
+      const { notifyDriverSuratJalan } = await import("../bot/driverNotify");
+      await notifyDriverSuratJalan(tripId, user.name).catch(err => console.error("[dispatch] notify SJ", err));
+    });
     return tripId;
   });
 }
@@ -93,6 +98,10 @@ export async function cancelTrip(tripId: string, reason: string) {
       return true;
     });
     if (!cancelled) throw new Error("Trip baru saja berangkat; tidak bisa dibatalkan dari sini.");
+    after(async () => {
+      const { notifyDriverCancelled } = await import("../bot/driverNotify");
+      await notifyDriverCancelled(tripId, reason.trim(), user.name).catch(err => console.error("[dispatch] notify cancel", err));
+    });
     if (trip.orderId) {
       const order = await prisma.charterOrder.findUnique({ where: { id: trip.orderId } });
       if (order?.status === "Scheduled") {

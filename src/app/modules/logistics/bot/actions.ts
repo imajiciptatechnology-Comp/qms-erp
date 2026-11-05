@@ -8,6 +8,7 @@ import { getBotUsername, isTelegramConfigured, tg, webhookSecret } from "@/lib/t
 import { getLogisticsAccess, guardAccess } from "../server";
 import { createLiveTrip } from "../tripOps";
 import { sendToDriver } from "./telegramBot";
+import { notifyDriverNewTrip } from "./driverNotify";
 
 const guard = async (check: Parameters<typeof guardAccess>[0]) => (await guardAccess(check)).user;
 const fail = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Terjadi kesalahan." });
@@ -65,11 +66,9 @@ export async function getChatFeed(driverId?: string | null): Promise<{ ok: true;
 export async function startLiveTrip(input: { driverId: string; vehicleId: string; orderId?: string | null; routeId?: string | null }) {
   try {
     const user = await guard(a => a.canDispatch);
-    const { trip, vehicle, route, order, stopNames } = await createLiveTrip(input, user.name);
-    // Kanal Telegram & Driver simulator; sendToDriver melewati kanal yang gagal.
-    const notified = await sendToDriver(input.driverId,
-      `🆕 Tugas baru ${trip.tripNo}\n${vehicle.plateNo} · ${route.origin} → ${route.destination}${order ? `\nMuat: ${order.originName} · ${order.loadDate} ${order.loadTime ?? ""}` : ""}\nBongkar: ${stopNames.join("; ")}\n\nIsi ✅ P2H dulu, lalu tekan 🚚 Berangkat.`,
-      { sentBy: user.name, tripId: trip.id, inline: [[{ text: "📋 Lihat tugas", callback_data: "task" }]] }).catch(() => false);
+    const { trip } = await createLiveTrip(input, user.name);
+    // Kanal Telegram & Driver simulator; pesan sama dengan dispatch biasa.
+    const notified = await notifyDriverNewTrip(trip.id, user.name).catch(() => false);
     revalidatePath("/modules/logistics/tracking");
     return { ok: true as const, tripNo: trip.tripNo, notified };
   } catch (err) { return fail(err); }
