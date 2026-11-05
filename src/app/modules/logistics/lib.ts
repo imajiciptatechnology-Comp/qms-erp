@@ -47,7 +47,9 @@ export function logisticsAccess(user: { role: string } | null, rolesConfig: { na
 }
 
 export const rupiah = (n: number) => "Rp " + Math.round(n || 0).toLocaleString("id-ID");
-export const today = () => new Date().toISOString().split("T")[0];
+/** Tanggal hari ini menurut WIB (UTC+7). Server Vercel memakai UTC; tanpa geser, 00:00–07:00 WIB terhitung "kemarin". */
+export const wibDate = (at: number | string | Date = Date.now()) => new Date(new Date(at).getTime() + 7 * 3_600_000).toISOString().slice(0, 10);
+export const today = () => wibDate();
 export const addDays = (date: string, n: number) => {
   const d = new Date(date + "T00:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);

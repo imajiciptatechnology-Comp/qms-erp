@@ -7,10 +7,13 @@ import { TRIP_STATUSES } from "../trackingLib";
 
 export type MapUnit = {
   id: string; plateNo: string; status: string; lat: number | null; lng: number | null; path: [number, number][];
+  /** HTML popup — WAJIB sudah di-escape oleh pemanggil (lihat esc() di FleetTracking). */
   stale?: boolean; alert?: boolean; popupHtml: string;
 };
 
 const POOL: [number, number] = [-6.3008, 107.153];
+
+const textNode = (s: string) => { const el = document.createElement("span"); el.textContent = s; return el; };
 
 /** Peta Leaflet + OpenStreetMap (gratis, wajib atribusi). Titik = posisi terakhir, warna = status, garis putus = rencana rute. */
 export default function FleetMap({ units, selectedId, onSelect, height = 460, fitKey }: {
@@ -65,7 +68,8 @@ export default function FleetMap({ units, selectedId, onSelect, height = 460, fi
       const mk = leaflet.circleMarker([u.lat, u.lng], {
         radius: sel ? 12 : 9, color: u.alert ? "#dc2626" : "#ffffff", weight: u.alert ? 3 : 2,
         fillColor: u.stale ? "#94a3b8" : color, fillOpacity: 0.95,
-      }).bindTooltip(u.plateNo, { permanent: true, direction: "right", offset: [10, 0], className: "fleet-map-label" }).bindPopup(u.popupHtml);
+      // Tooltip Leaflet memakai innerHTML untuk string: nopol dipasang sebagai teks, bukan HTML.
+      }).bindTooltip(textNode(u.plateNo), { permanent: true, direction: "right", offset: [10, 0], className: "fleet-map-label" }).bindPopup(u.popupHtml);
       mk.on("click", () => onSelect?.(u.id));
       mk.addTo(layer.current);
       if (sel) mk.openPopup();

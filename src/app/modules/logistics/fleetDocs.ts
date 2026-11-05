@@ -2,6 +2,7 @@
 // Sengaja bukan "use server": dipanggil dari server actions, halaman, dan webhook bot.
 import { prisma } from "@/lib/prisma";
 import { getJson, setJson } from "@/lib/kvStore";
+import { claimInterval, withLock } from "./dbUtil";
 import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES, addDays, expiryState, qualifiesFor, today } from "./lib";
 
 /** Dokumen Verified dengan masa berlaku paling akhir per jenis. */
@@ -149,26 +150,32 @@ export async function runFleetReminders(onDriverReminder?: (item: ExpiringItem, 
  * Sekali baca–tulis, tanpa revalidatePath, jadi aman dipanggil dari after()/webhook.
  */
 export async function notifyPermission(permission: string, messages: string[], link?: string) {
-  const [users, roles, list] = await Promise.all([
+  const [users, roles] = await Promise.all([
     prisma.user.findMany({ select: { id: true, role: true } }),
     getJson<{ name: string; permissions: string[] }[]>("roles", []),
-    getJson<{ id: string; userId?: string; message: string; isRead: boolean; createdAt: string; link?: string }[]>("notifications", []),
   ]);
   const targets = users.filter(u => u.role === "Super Admin" || roles.find(r => r.name === u.role)?.permissions?.some(p => p === permission || p === "all"));
+  if (!targets.length || !messages.length) return;
   const at = new Date().toISOString();
-  let n = 0;
-  for (const message of messages) for (const u of targets) {
-    list.unshift({ id: `${Date.now()}-${n++}`, userId: u.id, message, isRead: false, createdAt: at, link });
-  }
-  await setJson("notifications", list.slice(0, 500));
+  // Baca–ubah–tulis daftar notifikasi di bawah satu kunci: notifikasi dari webhook bot & aksi kantor
+  // yang datang bersamaan tidak saling menimpa.
+  await withLock("kv:notifications", async tx => {
+    const row = await tx.kvStore.findUnique({ where: { key: "notifications" } });
+    let list: { id: string; userId?: string; message: string; isRead: boolean; createdAt: string; link?: string }[] = [];
+    try { list = row ? JSON.parse(row.value) : []; } catch { list = []; }
+    let n = 0;
+    for (const message of messages) for (const u of targets) {
+      list.unshift({ id: `${Date.now()}-${n++}`, userId: u.id, message: message.slice(0, 500), isRead: false, createdAt: at, link });
+    }
+    const value = JSON.stringify(list.slice(0, 500));
+    await tx.kvStore.upsert({ where: { key: "notifications" }, update: { value }, create: { key: "notifications", value } });
+  });
 }
 
 /** Dipanggil lewat after() saat halaman logistik dibuka: paling sering sekali per jam. */
 export async function maybeRunFleetReminders(onDriverReminder?: Parameters<typeof runFleetReminders>[0]) {
-  const key = "logistics_doc_reminders_last";
-  const last = await getJson<number>(key, 0);
-  if (Date.now() - last < 60 * 60 * 1000) return;
-  await setJson(key, Date.now());
+  // Atomik: dua halaman yang dibuka bersamaan tidak mengirim pengingat ganda.
+  if (!(await claimInterval("logistics_doc_reminders_last", 60 * 60 * 1000))) return;
   try {
     // Default: pengingat SIM dikirim ke sopirnya sendiri lewat bot Telegram (bila terhubung).
     const toDriver = onDriverReminder ?? (async (item: ExpiringItem, text: string) => {

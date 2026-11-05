@@ -5,16 +5,11 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { getJson, setJson } from "@/lib/kvStore";
 import { uploadToStorage } from "@/lib/uploadFile";
-import { getLogisticsAccess } from "../server";
+import { guardAccess } from "../server";
 import { ACTIVE_TRIP_STATUSES, parsePlan, pointAlong, type LatLng } from "../trackingLib";
 import { handleTelegramUpdate, type TgUpdate } from "./telegramBot";
 
-async function guard() {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!access.canDispatch) throw new Error("Driver simulator hanya untuk Dispatcher / Ops / Super Admin.");
-  return user;
-}
+const guard = async () => (await guardAccess(a => a.canDispatch, "Driver simulator hanya untuk Dispatcher / Ops / Super Admin.")).user;
 const fail = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Terjadi kesalahan." });
 const chatIdOf = (driverId: string) => `sim-${driverId}`;
 
@@ -57,17 +52,17 @@ export async function simSend(driverId: string, input: SimInput) {
     if (input.type === "text") {
       const text = input.text.trim().slice(0, 1500);
       if (!text) return { ok: true as const };
-      await handleTelegramUpdate(update(chatId, driver.name, { text }));
+      await handleTelegramUpdate(update(chatId, driver.name, { text }), "simulator");
     } else if (input.type === "button") {
-      await handleTelegramUpdate({ update_id: seq++, callback_query: { id: String(seq++), from: { id: 0, first_name: driver.name }, data: input.data, message: update(chatId, driver.name, {}).message } });
+      await handleTelegramUpdate({ update_id: seq++, callback_query: { id: String(seq++), from: { id: 0, first_name: driver.name }, data: input.data, message: update(chatId, driver.name, {}).message } }, "simulator");
     } else if (input.type === "photo") {
       const m = input.dataUrl.match(/^data:image\/(jpeg|png|webp);base64,(.+)$/);
       if (!m || input.dataUrl.length > 4_000_000) throw new Error("Foto harus JPG/PNG maks. ±3 MB.");
       const url = await uploadToStorage(`logistics/telegram/${driverId}`, new File([Buffer.from(m[2], "base64")], `sim-${Date.now()}.jpg`, { type: `image/${m[1]}` }));
-      await handleTelegramUpdate(update(chatId, driver.name, { photo: [{ file_id: `url:${url}`, width: 1200, height: 900, file_size: 100_000 }], caption: input.caption }));
+      await handleTelegramUpdate(update(chatId, driver.name, { photo: [{ file_id: `url:${url}`, width: 1200, height: 900, file_size: 100_000 }], caption: input.caption }), "simulator");
     } else {
       const pos = await nextPosition(driverId, false);
-      await handleTelegramUpdate(update(chatId, driver.name, { location: { latitude: pos[0], longitude: pos[1], live_period: 28_800 } }));
+      await handleTelegramUpdate(update(chatId, driver.name, { location: { latitude: pos[0], longitude: pos[1], live_period: 28_800 } }), "simulator");
     }
     return { ok: true as const };
   } catch (err) { return fail(err); }
@@ -104,7 +99,7 @@ export async function simLiveTick(driverId: string) {
     const driver = await prisma.driver.findUniqueOrThrow({ where: { id: driverId } });
     const chatId = await ensureLink(driverId, user.name);
     const pos = await nextPosition(driverId, true);
-    await handleTelegramUpdate(update(chatId, driver.name, { location: { latitude: pos[0], longitude: pos[1], live_period: 28_800 } }, true));
+    await handleTelegramUpdate(update(chatId, driver.name, { location: { latitude: pos[0], longitude: pos[1], live_period: 28_800 } }, true), "simulator");
     return { ok: true as const, lat: pos[0], lng: pos[1] };
   } catch (err) { return fail(err); }
 }

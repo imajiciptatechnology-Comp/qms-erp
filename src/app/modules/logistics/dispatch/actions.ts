@@ -1,31 +1,13 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { AiError, aiComplete, isAiConfigured } from "@/lib/ai";
 import { uploadToStorage } from "@/lib/uploadFile";
-import { getLogisticsAccess } from "../server";
+import { guardAccess as guard, runAction as run } from "../server";
+import { consumeDailyQuota } from "../dbUtil";
 import { canOverride, evaluateTrip, LEVEL_LABEL } from "../dispatchRules";
 import { createTrip, issueSuratJalan } from "../tripOps";
 import { notifyPermission } from "../fleetDocs";
-
-type Access = Awaited<ReturnType<typeof getLogisticsAccess>>["access"];
-async function guard(check: (a: Access) => boolean) {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!check(access)) throw new Error("Role Anda tidak punya akses untuk aksi ini.");
-  return { user, access };
-}
-type Result = { success: true; id?: string } | { success: false; message: string };
-async function run(fn: () => Promise<string | void>): Promise<Result> {
-  try {
-    const id = await fn();
-    revalidatePath("/modules/logistics", "layout");
-    return { success: true, id: id || undefined };
-  } catch (err) {
-    return { success: false, message: err instanceof Error ? err.message : "Terjadi kesalahan." };
-  }
-}
 
 /** Dispatcher: assign truk + sopir (+ kenek) ke order Confirmed. */
 export async function assignTrip(input: { orderId: string; vehicleId: string; driverId: string; helperId: string | null; dutyAck: boolean }) {
@@ -51,8 +33,8 @@ export async function overrideCondition(fd: FormData) {
     const { user, access } = await guard(a => a.canView);
     const tripId = String(fd.get("tripId") ?? "");
     const key = String(fd.get("key") ?? "");
-    const reason = String(fd.get("reason") ?? "").trim();
-    const controlAction = String(fd.get("controlAction") ?? "").trim();
+    const reason = String(fd.get("reason") ?? "").trim().slice(0, 1000);
+    const controlAction = String(fd.get("controlAction") ?? "").trim().slice(0, 300);
     if (reason.length < 10) throw new Error("Alasan override wajib diisi (min. 10 karakter).");
     if (!controlAction) throw new Error("Pilih tindakan pengendalian.");
     const ev = await evaluateTrip(tripId);
@@ -103,10 +85,14 @@ export async function cancelTrip(tripId: string, reason: string) {
     const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId } });
     if (trip.status !== "Scheduled") throw new Error("Hanya trip yang belum berangkat yang bisa dibatalkan.");
     const now = new Date().toISOString();
-    await prisma.$transaction([
-      prisma.trip.update({ where: { id: tripId }, data: { status: "Cancelled" } }),
-      prisma.tripEvent.create({ data: { tripId, status: "Cancelled", label: `Trip dibatalkan oleh ${user.name}: ${reason.trim()}`, at: now, source: "Kantor", by: user.name } }),
-    ]);
+    // Bersyarat: sopir bisa saja menekan "Berangkat" pada saat yang sama.
+    const cancelled = await prisma.$transaction(async tx => {
+      const res = await tx.trip.updateMany({ where: { id: tripId, status: "Scheduled" }, data: { status: "Cancelled" } });
+      if (res.count === 0) return false;
+      await tx.tripEvent.create({ data: { tripId, status: "Cancelled", label: `Trip dibatalkan oleh ${user.name}: ${reason.trim().slice(0, 300)}`, at: now, source: "Kantor", by: user.name } });
+      return true;
+    });
+    if (!cancelled) throw new Error("Trip baru saja berangkat; tidak bisa dibatalkan dari sini.");
     if (trip.orderId) {
       const order = await prisma.charterOrder.findUnique({ where: { id: trip.orderId } });
       if (order?.status === "Scheduled") {
@@ -122,11 +108,12 @@ export async function cancelTrip(tripId: string, reason: string) {
 /** AI menjelaskan usulan truk & sopir (hitungan & kelayakan tetap dari kode). */
 export async function aiExplainDispatch(data: { order: string; truck: string; truckIssues: string[]; driver: string; driverIssues: string[]; dutyWarnings: string[]; alternatives: string[] }) {
   try {
-    await guard(a => a.canView);
+    const { user } = await guard(a => a.canView);
     if (!isAiConfigured()) return { ok: false as const, error: "AI belum dikonfigurasi." };
+    if (!(await consumeDailyQuota(`ai_dispatch_explain:${user.id}`, 60))) return { ok: false as const, error: "Batas 60 penjelasan AI per hari sudah tercapai." };
     const { text } = await aiComplete([
       { role: "system", content: "Anda asisten dispatcher truk charter. Jelaskan singkat (maks. 5 kalimat, bahasa Indonesia) kenapa kombinasi truk & sopir ini diusulkan, risiko yang perlu diperhatikan, dan alternatifnya. Pakai hanya data yang diberikan." },
-      { role: "user", content: JSON.stringify(data) },
+      { role: "user", content: JSON.stringify(data).slice(0, 8000) },
     ], { maxTokens: 500, temperature: 0.3, reasoningEffort: "low" });
     return { ok: true as const, text };
   } catch (err) {

@@ -3,6 +3,7 @@
 import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { today } from "./lib";
+import { withLock, type Tx } from "./dbUtil";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, firstUnloadMin, parsePlan } from "./trackingLib";
 import { buildPlan } from "./tracking";
 import { driverConditions, dutyWarnings, evaluateTrip, orderConditions, vehicleConditions, vehicleRuleInclude, type Condition } from "./dispatchRules";
@@ -51,10 +52,18 @@ export async function applyTripStatus(tripId: string, to: string, by: string, so
   const leavingStop = trip.status === "Unloading";
   const stopsDone = leavingStop ? trip.stopsDone + 1 : trip.stopsDone;
   const label = to === "Unloading" ? `Tiba di titik bongkar ${trip.stopsDone + 1}` : to === "InTransit" && leavingStop ? `Selesai bongkar titik ${trip.stopsDone + 1}, menuju titik berikutnya` : EVENT_LABEL[to];
-  await prisma.$transaction([
-    prisma.trip.update({ where: { id: tripId }, data: { status: to, stopsDone, ...(to === "ToLoad" ? { startedAt: now } : {}), ...(to === "Completed" ? { completedAt: now } : {}) } }),
-    prisma.tripEvent.create({ data: { tripId, status: to, label, at: now, lat: trip.lastLat, lng: trip.lastLng, source, by } }),
-  ]);
+  // Bersyarat pada status & stopsDone yang dibaca tadi: tombol yang ditekan dua kali (atau dari dua perangkat)
+  // hanya tercatat sekali, dan stopsDone tidak naik dua kali.
+  const applied = await prisma.$transaction(async tx => {
+    const res = await tx.trip.updateMany({
+      where: { id: tripId, status: trip.status, stopsDone: trip.stopsDone },
+      data: { status: to, stopsDone, ...(to === "ToLoad" ? { startedAt: now } : {}), ...(to === "Completed" ? { completedAt: now } : {}) },
+    });
+    if (res.count === 0) return false;
+    await tx.tripEvent.create({ data: { tripId, status: to, label, at: now, lat: trip.lastLat, lng: trip.lastLng, source, by } });
+    return true;
+  });
+  if (!applied) throw new Error("Status trip baru saja berubah (tombol ditekan dua kali?). Buka 📋 Tugas saya untuk tombol terbaru.");
   if (to === "Completed") await afterTripCompleted(tripId);
   return label;
 }
@@ -141,9 +150,9 @@ export async function checkAssignment(input: TripInput) {
   return { vehicle, driver, order, conditions };
 }
 
-async function nextSuratJalanNo() {
+async function nextSuratJalanNo(tx: Tx) {
   const prefix = `ATN/SJ/${today().slice(0, 4)}/`;
-  const rows = await prisma.trip.findMany({ where: { suratJalanNo: { startsWith: prefix } }, select: { suratJalanNo: true } });
+  const rows = await tx.trip.findMany({ where: { suratJalanNo: { startsWith: prefix } }, select: { suratJalanNo: true } });
   const max = rows.reduce((m, r) => Math.max(m, Number(r.suratJalanNo!.split("/").pop()) || 0), 0);
   return `${prefix}${today().slice(5, 7)}/${String(max + 1).padStart(4, "0")}`;
 }
@@ -160,6 +169,10 @@ export async function createTrip(input: TripInput, by: string, opts: { mode: "di
   if (opts.mode === "demo" && conditions.length) throw new Error(`Perlu override dulu (${conditions.map(c => c.text).join("; ")}). Pakai papan Dispatch.`);
   if (order && order.truckTypeId !== vehicle.truckTypeId) throw new Error("Jenis truk tidak sesuai order.");
   if (order && order.status !== "Confirmed") throw new Error(`Order berstatus ${order.status}; hanya order Confirmed yang bisa di-dispatch.`);
+  if (input.helperId) {
+    const helper = await prisma.helper.findUnique({ where: { id: input.helperId }, select: { status: true } });
+    if (!helper || helper.status !== "Active") throw new Error("Kenek tidak ditemukan atau nonaktif.");
+  }
 
   const busy = await prisma.trip.findMany({ where: { status: { in: ACTIVE_TRIP_STATUSES }, OR: [{ vehicleId: vehicle.id }, { driverId: driver.id }, ...(input.helperId ? [{ helperId: input.helperId }] : []), ...(order ? [{ orderId: order.id }] : [])] } });
   if (busy.some(t => !t.isSimulated)) throw new Error("Truk, sopir, kenek, atau order ini masih terikat trip aktif.");
@@ -185,20 +198,28 @@ export async function createTrip(input: TripInput, by: string, opts: { mode: "di
   const toLoadMin = plan.phases.find(p => p.status === "ToLoad")?.minutes ?? 0;
   const start = Number.isFinite(loadAt) && loadAt - toLoadMin * 60_000 > Date.now() ? loadAt - toLoadMin * 60_000 : Date.now();
   const id = crypto.randomUUID();
+  const tripNo = `TRP-${today().slice(2).replace(/-/g, "")}-${id.slice(0, 4).toUpperCase()}`;
   const now = new Date().toISOString();
+  // Klaim order secara bersyarat (Confirmed → Scheduled) sebelum trip dibuat: dua dispatcher yang
+  // meng-assign order yang sama bersamaan tidak menghasilkan dua trip.
+  if (order) {
+    const list = JSON.parse(order.historyJson || "[]");
+    list.push({ id: String(list.length + 1), date: now, userName: by, action: `Dispatch: ${vehicle.plateNo} · ${driver.name} (${tripNo})` });
+    const claimed = await prisma.charterOrder.updateMany({ where: { id: order.id, status: "Confirmed" }, data: { status: "Scheduled", historyJson: JSON.stringify(list) } });
+    if (claimed.count === 0) throw new Error("Order ini baru saja di-dispatch atau statusnya berubah. Muat ulang papan Dispatch.");
+  }
   const trip = await prisma.trip.create({ data: {
-    id, tripNo: `TRP-${today().slice(2).replace(/-/g, "")}-${id.slice(0, 4).toUpperCase()}`,
+    id, tripNo,
     orderId: order?.id ?? null, routeId: route.id, clientId: order?.clientId ?? null, vehicleId: vehicle.id, driverId: driver.id, helperId,
     status: "Scheduled", plannedStart: new Date(start).toISOString(), promisedArrival: new Date(start + (firstUnloadMin(plan) + 60) * 60_000).toISOString(),
     planJson: JSON.stringify(plan), dutyAckJson: warnings.length ? JSON.stringify({ by, at: now, warnings }) : null,
     notes: opts.mode === "demo" ? "Trip live (demo bot Telegram)" : null, createdBy: by, createdAt: now,
-  } });
+  } }).catch(async err => {
+    // Trip gagal dibuat → kembalikan order ke antrean dispatch.
+    if (order) await prisma.charterOrder.update({ where: { id: order.id }, data: { status: "Confirmed", historyJson: order.historyJson } }).catch(() => {});
+    throw err;
+  });
   await prisma.tripEvent.create({ data: { tripId: trip.id, status: "Scheduled", label: `Truk ${vehicle.plateNo} + ${driver.name} di-assign oleh ${by}${warnings.length ? ` (peringatan jam kerja dibaca: ${warnings.length})` : ""}`, at: now, source: "Kantor", by } });
-  if (order) {
-    const list = JSON.parse(order.historyJson || "[]");
-    list.push({ id: String(list.length + 1), date: now, userName: by, action: `Dispatch: ${vehicle.plateNo} · ${driver.name} (${trip.tripNo})` });
-    await prisma.charterOrder.update({ where: { id: order.id }, data: { status: "Scheduled", historyJson: JSON.stringify(list) } });
-  }
   if (opts.mode === "demo") await issueSuratJalan(trip.id, by);
   return { trip, vehicle, driver, route, order, stopNames, conditions, warnings };
 }
@@ -210,13 +231,18 @@ export async function issueSuratJalan(tripId: string, by: string) {
   if (!["Scheduled"].includes(ev.trip.status)) throw new Error("Surat Jalan hanya untuk trip yang belum berangkat.");
   if (ev.blocked.length) throw new Error(`Diblokir (tidak bisa di-override): ${ev.blocked.map(c => c.text).join("; ")}.`);
   if (ev.pending.length) throw new Error(`Masih perlu override: ${ev.pending.map(c => `${c.text} (${c.level})`).join("; ")}.`);
-  const no = await nextSuratJalanNo();
-  const now = new Date().toISOString();
-  await prisma.$transaction([
-    prisma.trip.update({ where: { id: tripId }, data: { suratJalanNo: no, suratJalanAt: now, suratJalanBy: by } }),
-    prisma.tripEvent.create({ data: { tripId, status: "SJ", label: `Surat Jalan ${no} diterbitkan${ev.items.length ? ` (${ev.items.length} kondisi di-override)` : ""}`, at: now, source: "Kantor", by } }),
-  ]);
-  return no;
+  // suratJalanNo tidak @unique di DB: nomor dibaca & ditulis di bawah satu advisory lock,
+  // dan trip yang sudah punya nomor (klik ganda) tidak diberi nomor kedua.
+  return withLock("logistics:surat-jalan-no", async tx => {
+    const cur = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, select: { suratJalanNo: true, status: true } });
+    if (cur.suratJalanNo) return cur.suratJalanNo;
+    if (cur.status !== "Scheduled") throw new Error("Surat Jalan hanya untuk trip yang belum berangkat.");
+    const no = await nextSuratJalanNo(tx);
+    const now = new Date().toISOString();
+    await tx.trip.update({ where: { id: tripId }, data: { suratJalanNo: no, suratJalanAt: now, suratJalanBy: by } });
+    await tx.tripEvent.create({ data: { tripId, status: "SJ", label: `Surat Jalan ${no} diterbitkan${ev.items.length ? ` (${ev.items.length} kondisi di-override)` : ""}`, at: now, source: "Kantor", by } });
+    return no;
+  });
 }
 
 /** Kompatibel dengan pemanggil lama (trip live dari Fleet Tracking / Driver simulator). */

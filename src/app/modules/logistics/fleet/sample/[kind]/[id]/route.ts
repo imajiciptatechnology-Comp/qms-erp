@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getLogisticsAccess } from "../../../../server";
 import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES, rupiah } from "../../../../lib";
 
-const esc = (s: string) => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+// Escape teks XML + buang karakter kontrol (membuat SVG tidak valid).
+const esc = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 function svg(title: string, subtitle: string, rows: [string, string][], color: string) {
   const lines = rows.map(([k, v], i) => `<text x="48" y="${168 + i * 40}" font-size="20" fill="#475569">${esc(k)}</text><text x="330" y="${168 + i * 40}" font-size="22" font-weight="600" fill="#0f172a">: ${esc(v)}</text>`).join("");
@@ -80,5 +81,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ kind: s
     if (s) body = svg("Nota Servis Bengkel", s.workshop, [["Tanggal", s.serviceDate], ["Nomor polisi", s.vehicle.plateNo], ["Odometer", `${s.odometerKm.toLocaleString("id-ID")} km`], ["Jenis", s.kind], ["Pekerjaan", s.items.slice(0, 48)], ["Total biaya", rupiah(s.cost)]], "#334155");
   }
   if (!body) return new Response("Not found", { status: 404 });
-  return new Response(body, { headers: { "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "private, max-age=300" } });
+  return new Response(body, { headers: {
+    "Content-Type": "image/svg+xml; charset=utf-8", "Cache-Control": "private, max-age=300",
+    // SVG dibuka langsung di tab: larang skrip apa pun sebagai lapisan kedua di samping escape.
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox", "X-Content-Type-Options": "nosniff",
+  } });
 }

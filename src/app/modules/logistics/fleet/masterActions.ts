@@ -1,28 +1,12 @@
 "use server";
 
 // Master armada: tambah/edit truk, sopir, kenek (Fleet Manager).
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getLogisticsAccess } from "../server";
+import { guardAccess, runAction } from "../server";
 import { syncAutoQualifications } from "../fleetDocs";
 
-type Result = { success: true; id?: string } | { success: false; message: string };
-async function run(fn: () => Promise<string | void>): Promise<Result> {
-  try {
-    const id = await fn();
-    revalidatePath("/modules/logistics", "layout");
-    return { success: true, id: id || undefined };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Terjadi kesalahan.";
-    return { success: false, message: msg.includes("Unique constraint") ? "Data dengan nomor/kode yang sama sudah ada." : msg };
-  }
-}
-async function guardFleet() {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!access.canFleet) throw new Error("Hanya Fleet Manager yang bisa mengelola data armada & kru.");
-  return user;
-}
+const run = (fn: () => Promise<string | void>) => runAction(fn, { uniqueMessage: "Data dengan nomor/kode yang sama sudah ada." });
+const guardFleet = async () => (await guardAccess(a => a.canFleet, "Hanya Fleet Manager yang bisa mengelola data armada & kru.")).user;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const str = (fd: FormData, k: string) => { const v = fd.get(k); return typeof v === "string" && v.trim() ? v.trim() : null; };

@@ -1,24 +1,12 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { AiError } from "@/lib/ai";
 import { generateOrderDraft } from "./ai/draftOrder";
-import { addHistory, guardLogistics, insertOrder, orderData, type OrderInput } from "./server";
+import { addHistory, guardLogistics, insertOrder, orderData, runAction as run, type OrderInput } from "./server";
+import { consumeDailyQuota } from "./dbUtil";
 
 export type { OrderInput } from "./server";
-
-type Result = { success: true; id?: string } | { success: false; message: string };
-
-async function run(fn: () => Promise<string | void>): Promise<Result> {
-  try {
-    const id = await fn();
-    revalidatePath("/modules/logistics", "layout");
-    return { success: true, id: id || undefined };
-  } catch (err) {
-    return { success: false, message: err instanceof Error ? err.message : "Terjadi kesalahan." };
-  }
-}
 
 // ---------------------------------------------------------
 // Order charter
@@ -60,7 +48,9 @@ export async function setOrderStatus(id: string, status: string, reason?: string
     if (!TRANSITIONS[order.status]?.includes(status)) throw new Error(`Status ${order.status} tidak bisa diubah ke ${status}.`);
     if (status === "Cancelled" && !reason?.trim()) throw new Error("Alasan pembatalan wajib diisi.");
     const label = { Confirmed: "Order dikonfirmasi ke klien", Draft: "Dikembalikan ke Draft", Cancelled: `Order dibatalkan: ${reason}` }[status] ?? status;
-    await prisma.charterOrder.update({ where: { id }, data: { status, historyJson: addHistory(order.historyJson, user.name, label) } });
+    // Bersyarat status lama: kalau order baru saja di-dispatch di tab lain, perubahan ini ditolak.
+    const res = await prisma.charterOrder.updateMany({ where: { id, status: order.status }, data: { status, historyJson: addHistory(order.historyJson, user.name, label) } });
+    if (res.count === 0) throw new Error("Status order baru saja berubah. Muat ulang halaman.");
   });
 }
 
@@ -70,8 +60,10 @@ export async function setOrderStatus(id: string, status: string, reason?: string
 
 export async function aiDraftOrder(input: { text: string; source: "Teks" | "Suara" }) {
   try {
-    await guardLogistics("order");
-    const result = await generateOrderDraft(input);
+    const user = await guardLogistics("order");
+    if (typeof input?.text !== "string" || !input.text.trim()) throw new Error("Tempel teks/chat dari klien atau rekam suara terlebih dahulu.");
+    if (!(await consumeDailyQuota(`ai_order_draft:${user.id}`, 60))) throw new Error("Batas 60 draft order AI per hari sudah tercapai.");
+    const result = await generateOrderDraft({ text: input.text.slice(0, 6000), source: input.source === "Suara" ? "Suara" : "Teks" });
     return { success: true as const, ...result };
   } catch (err) {
     const message = err instanceof AiError || err instanceof Error ? err.message : "Gagal menyusun order dengan AI.";

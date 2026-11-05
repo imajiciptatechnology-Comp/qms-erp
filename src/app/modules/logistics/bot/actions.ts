@@ -5,17 +5,11 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getBotUsername, isTelegramConfigured, tg, webhookSecret } from "@/lib/telegram";
-import { getLogisticsAccess } from "../server";
+import { getLogisticsAccess, guardAccess } from "../server";
 import { createLiveTrip } from "../tripOps";
 import { sendToDriver } from "./telegramBot";
 
-type Access = Awaited<ReturnType<typeof getLogisticsAccess>>["access"];
-async function guard(check: (a: Access) => boolean) {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!check(access)) throw new Error("Role Anda tidak punya akses untuk aksi ini.");
-  return user;
-}
+const guard = async (check: Parameters<typeof guardAccess>[0]) => (await guardAccess(check)).user;
 const fail = (err: unknown) => ({ ok: false as const, error: err instanceof Error ? err.message : "Terjadi kesalahan." });
 
 /** Fleet Manager: link undangan sekali pakai (berlaku 7 hari) untuk menghubungkan Telegram sopir. */

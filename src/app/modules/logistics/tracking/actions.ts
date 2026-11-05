@@ -1,17 +1,11 @@
 "use server";
 
 import { AiError, aiComplete, isAiConfigured } from "@/lib/ai";
-import { getJson, setJson } from "@/lib/kvStore";
-import { getLogisticsAccess } from "../server";
-import { today } from "../lib";
+import { guardAccess } from "../server";
+import { consumeDailyQuota } from "../dbUtil";
 import { getFleetSnapshot, resetSimulation, startSimulation, type FleetSnapshot } from "../tracking";
 
-async function guard(check: (a: Awaited<ReturnType<typeof getLogisticsAccess>>["access"]) => boolean) {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!check(access)) throw new Error("Role Anda tidak punya akses untuk aksi ini.");
-  return user;
-}
+const guard = async (check: Parameters<typeof guardAccess>[0]) => (await guardAccess(check)).user;
 
 /** Dipanggil dashboard tiap ±30 detik (polling biasa). Sekaligus menggerakkan trip simulasi. */
 export async function fetchFleetSnapshot(): Promise<{ ok: true; snapshot: FleetSnapshot } | { ok: false; error: string }> {
@@ -56,9 +50,7 @@ export async function aiFleetSummary(): Promise<{ ok: true; text: string; model:
   try {
     const user = await guard(a => a.canView);
     if (!isAiConfigured()) return { ok: false, error: "AI belum dikonfigurasi." };
-    const key = `ai_fleet_summary:${user.id}:${today()}`;
-    const used = await getJson<number>(key, 0);
-    if (used >= DAILY_LIMIT) return { ok: false, error: `Batas ${DAILY_LIMIT} ringkasan per hari sudah tercapai.` };
+    if (!(await consumeDailyQuota(`ai_fleet_summary:${user.id}`, DAILY_LIMIT))) return { ok: false, error: `Batas ${DAILY_LIMIT} ringkasan per hari sudah tercapai.` };
     const snap = await getFleetSnapshot();
     const data = {
       jam: time(snap.at),
@@ -73,7 +65,6 @@ export async function aiFleetSummary(): Promise<{ ok: true; text: string; model:
       { role: "system", content: "Anda asisten dispatcher perusahaan truk charter PT Arunika Trans Nusantara. Jawab dalam bahasa Indonesia yang ringkas. Gunakan hanya data yang diberikan; jangan mengarang angka, jam, atau nama." },
       { role: "user", content: `Data armada saat ini (JSON):\n${JSON.stringify(data)}\n\nTulis:\n1. Ringkasan kondisi armada (maks. 4 kalimat).\n2. Daftar unit berisiko telat/bermasalah: nopol, masalah, saran tindakan dispatcher (1 baris per unit).\n3. Draft pesan WhatsApp singkat dan sopan untuk tiap klien yang kirimannya berisiko telat (sebut nopol & perkiraan jam dari data). Kalau tidak ada, tulis "Tidak ada pesan ke klien yang perlu dikirim."\nFormat teks biasa dengan judul bagian, tanpa markdown tabel.` },
     ], { maxTokens: 1200, temperature: 0.3, reasoningEffort: "low" });
-    await setJson(key, used + 1);
     return { ok: true, text, model };
   } catch (err) {
     return { ok: false, error: err instanceof AiError || err instanceof Error ? err.message : "Gagal menyusun ringkasan." };

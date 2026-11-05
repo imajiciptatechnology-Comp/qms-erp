@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getLogisticsAccess } from "../server";
 import { ACTIVE_TRIP_STATUSES } from "../trackingLib";
-import { driverConditions, dutyWarnings, orderConditions, readiness, vehicleConditions, vehicleRuleInclude, vehicleWarnings } from "../dispatchRules";
+import { driverConditions, dutyWarningsMany, orderConditions, readiness, vehicleConditions, vehicleRuleInclude, vehicleWarnings } from "../dispatchRules";
 import { Card, StatusBadge } from "../ui";
 import DispatchBoard, { type Candidate } from "./DispatchBoard";
 
@@ -29,6 +29,8 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
       prisma.driver.findMany({ where: { status: "Active" }, include: { qualifications: true }, orderBy: { code: "asc" } }),
       prisma.helper.findMany({ where: { status: "Active" }, orderBy: { code: "asc" } }),
     ]);
+    // Satu query untuk semua sopir (sebelumnya satu query per sopir).
+    const duty = await dutyWarningsMany(drivers.map(d => d.id), sel.route.durationHours, sel.loadDate);
     const load = orderConditions(sel.cargoWeightTon, sel.truckType, true);
     const rank = (c: Candidate) => (c.busy ? 3 : { ready: 0, attention: 1, unfit: 2 }[c.state]);
     board = {
@@ -36,11 +38,11 @@ export default async function DispatchPage({ searchParams }: { searchParams: Pro
         const conds = [...vehicleConditions(v), ...load];
         return { id: v.id, label: v.plateNo, sub: `${v.brand ?? ""} · ${v.odometerKm.toLocaleString("id-ID")} km`, state: readiness(conds), conditions: conds, warnings: vehicleWarnings(v), busy: busyV.has(v.id) };
       }).sort((a, b) => rank(a) - rank(b)),
-      drivers: (await Promise.all(drivers.map(async d => {
+      drivers: drivers.map(d => {
         const conds = driverConditions(d, sel.truckType);
-        const warnings = conds.some(c => c.code === "3a") ? [] : await dutyWarnings(d.id, sel.route.durationHours, sel.loadDate);
+        const warnings = conds.some(c => c.code === "3a") ? [] : duty.get(d.id) ?? [];
         return { id: d.id, label: d.name, sub: `${d.code} · ${d.simClass} · ${String(d.experienceYears).replace(".", ",")} th`, state: readiness(conds), conditions: conds, warnings, busy: busyD.has(d.id) };
-      }))).sort((a, b) => rank(a) - rank(b) || a.warnings.length - b.warnings.length),
+      }).sort((a, b) => rank(a) - rank(b) || a.warnings.length - b.warnings.length),
       helpers: helpers.map(h => ({ id: h.id, label: h.name, sub: h.code, state: "ready" as const, conditions: [], warnings: [], busy: busyH.has(h.id), preferredDriverId: h.preferredDriverId })),
     };
   }

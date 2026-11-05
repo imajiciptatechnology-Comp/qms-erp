@@ -1,7 +1,7 @@
 // Tahap 2 — aturan kelayakan & blokir Surat Jalan (rancangan 3.5) + peringatan jam kerja sopir (1.3b).
 // Semua keputusan oleh kode; AI hanya boleh menjelaskan.
 import { prisma } from "@/lib/prisma";
-import { addDays, daysBetween, driverFlags, qualifiesFor, today } from "./lib";
+import { addDays, daysBetween, driverFlags, qualifiesFor, today, wibDate } from "./lib";
 import { ACTIVE_TRIP_STATUSES } from "./trackingLib";
 
 export type OverrideLevel = "none" | "fleet" | "ops" | "director";
@@ -74,13 +74,14 @@ export function readiness(conds: Condition[]): "ready" | "attention" | "unfit" {
 }
 
 type DriverInput = {
-  simExpiry: string; simClass: string; experienceYears: number; defensiveTraining: boolean; trailerCertified: boolean; unsettledAdvance: number;
+  status?: string; simExpiry: string; simClass: string; experienceYears: number; defensiveTraining: boolean; trailerCertified: boolean; unsettledAdvance: number;
   qualifications: { truckTypeId: string; basis: string }[];
 };
 
 /** Kondisi sopir untuk jenis truk tertentu (#3, #3a, #9). */
 export function driverConditions(d: DriverInput, type: { id: string; code: string; name: string }): Condition[] {
   const out: Condition[] = [];
+  if (d.status && d.status !== "Active") out.push({ key: "3:inactive", code: "3", subject: "driver", level: "none", text: `Sopir berstatus ${d.status}` });
   if (driverFlags(d).some(f => f.level === "red")) out.push({ key: "3:sim", code: "3", subject: "driver", level: "none", text: `SIM kedaluwarsa (${d.simExpiry})` });
   const q = d.qualifications.find(x => x.truckTypeId === type.id);
   const ok = q?.basis === "manual-revoke" ? false : q?.basis === "manual-add" ? true : qualifiesFor(d, type.code);
@@ -101,31 +102,48 @@ export function orderConditions(cargoTon: number | null, type: { capacityTon: nu
   return out;
 }
 
-/** Peringatan jam kerja sopir (1.3b) — hanya peringatan, wajib dicentang dispatcher. */
-export async function dutyWarnings(driverId: string, plannedHours: number, startDate = today()): Promise<string[]> {
-  const since = addDays(startDate, -14);
-  const trips = await prisma.trip.findMany({
-    where: { driverId, isSimulated: false, status: { not: "Cancelled" }, plannedStart: { gte: since } },
-    select: { plannedStart: true, startedAt: true, completedAt: true, status: true },
-  });
+type DutyTrip = { driverId: string; plannedStart: string; startedAt: string | null; completedAt: string | null; status: string };
+
+/** Peringatan jam kerja sopir (1.3b) dari daftar trip sopir itu (14 hari terakhir). Murni — tanpa query. */
+export function dutyWarningsFrom(trips: Omit<DutyTrip, "driverId">[], plannedHours: number, startDate = today()): string[] {
   const warnings: string[] = [];
-  const days = new Set(trips.map(t => t.plannedStart.slice(0, 10)));
+  // Hari kerja dihitung per tanggal WIB (plannedStart disimpan UTC: muat 06:00 WIB = 23:00 UTC hari sebelumnya).
+  const days = new Set(trips.map(t => wibDate(t.plannedStart)));
   days.add(startDate);
   let streak = 0;
   for (let d = startDate; days.has(d); d = addDays(d, -1)) streak++;
   if (streak > 6) warnings.push(`Sudah ${streak} hari berturut-turut bertugas (> 6 hari) — sarankan istirahatkan sopir`);
+  // Titik acuan = mulai tugas baru (bukan "sekarang") supaya order untuk besok dinilai benar.
+  const ref = Math.max(Date.now(), Date.parse(`${startDate}T00:00:00+07:00`));
   const lastDone = trips.filter(t => t.completedAt).sort((a, b) => b.completedAt!.localeCompare(a.completedAt!))[0];
   if (lastDone) {
-    const rest = (Date.now() - Date.parse(lastDone.completedAt!)) / 3_600_000;
-    if (rest < 8) warnings.push(`Jeda istirahat baru ${rest.toFixed(1)} jam sejak trip terakhir (< 8 jam)`);
+    const rest = (ref - Date.parse(lastDone.completedAt!)) / 3_600_000;
+    if (rest < 8) warnings.push(`Jeda istirahat baru ${Math.max(0, rest).toFixed(1)} jam sejak trip terakhir (< 8 jam)`);
   }
-  const weekAgo = Date.now() - 7 * 86_400_000;
+  const weekAgo = ref - 7 * 86_400_000;
   const weekHours = trips.filter(t => t.startedAt && t.completedAt && Date.parse(t.completedAt) > weekAgo)
     .reduce((s, t) => s + (Date.parse(t.completedAt!) - Date.parse(t.startedAt!)) / 3_600_000, 0);
   if (weekHours + plannedHours > 60) warnings.push(`Total jam kerja 7 hari ±${Math.round(weekHours + plannedHours)} jam (> 60 jam)`);
   if (plannedHours > 10) warnings.push(`Estimasi mengemudi ±${plannedHours} jam sekali jalan (> 10 jam/hari)`);
   if (trips.some(t => ACTIVE_TRIP_STATUSES.includes(t.status))) warnings.push("Sopir masih punya trip aktif");
   return warnings;
+}
+
+const dutyQuery = (driverIds: string[], startDate: string) => prisma.trip.findMany({
+  // Batas bawah sehari lebih awal karena plannedStart UTC.
+  where: { driverId: { in: driverIds }, isSimulated: false, status: { not: "Cancelled" }, plannedStart: { gte: addDays(startDate, -15) } },
+  select: { driverId: true, plannedStart: true, startedAt: true, completedAt: true, status: true },
+});
+
+/** Peringatan jam kerja satu sopir. */
+export async function dutyWarnings(driverId: string, plannedHours: number, startDate = today()): Promise<string[]> {
+  return dutyWarningsFrom(await dutyQuery([driverId], startDate), plannedHours, startDate);
+}
+
+/** Peringatan jam kerja banyak sopir sekaligus (satu query, untuk papan Dispatch). */
+export async function dutyWarningsMany(driverIds: string[], plannedHours: number, startDate = today()): Promise<Map<string, string[]>> {
+  const trips = driverIds.length ? await dutyQuery(driverIds, startDate) : [];
+  return new Map(driverIds.map(id => [id, dutyWarningsFrom(trips.filter(t => t.driverId === id), plannedHours, startDate)]));
 }
 
 export const vehicleRuleInclude = {

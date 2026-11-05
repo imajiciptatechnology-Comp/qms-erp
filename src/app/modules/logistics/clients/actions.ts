@@ -1,27 +1,11 @@
 "use server";
 
 // Master klien logistik + lokasi muat/bongkar (CS / Operations Manager).
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getLogisticsAccess } from "../server";
+import { guardAccess, runAction } from "../server";
 
-type Result = { success: true; id?: string } | { success: false; message: string };
-async function run(fn: () => Promise<string | void>): Promise<Result> {
-  try {
-    const id = await fn();
-    revalidatePath("/modules/logistics", "layout");
-    return { success: true, id: id || undefined };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "Terjadi kesalahan.";
-    return { success: false, message: msg.includes("Unique constraint") ? "Kode klien sudah dipakai." : msg };
-  }
-}
-async function guard() {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!(access.canOrder || access.canRates)) throw new Error("Hanya Admin Order / Operations Manager yang bisa mengelola klien.");
-  return user;
-}
+const run = (fn: () => Promise<string | void>) => runAction(fn, { uniqueMessage: "Kode klien sudah dipakai." });
+const guard = async () => (await guardAccess(a => a.canOrder || a.canRates, "Hanya Admin Order / Operations Manager yang bisa mengelola klien.")).user;
 const str = (fd: FormData, k: string) => { const v = fd.get(k); return typeof v === "string" && v.trim() ? v.trim() : null; };
 const req = (fd: FormData, k: string, label: string) => { const v = str(fd, k); if (!v) throw new Error(`${label} wajib diisi.`); return v; };
 const coord = (fd: FormData, k: string, min: number, max: number) => {

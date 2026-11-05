@@ -1,33 +1,13 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { AiError, isAiConfigured } from "@/lib/ai";
-import { getJson, setJson } from "@/lib/kvStore";
 import { uploadToStorage } from "@/lib/uploadFile";
-import { getLogisticsAccess } from "../server";
+import { guardAccess as guard, runAction as run } from "../server";
+import { consumeDailyQuota } from "../dbUtil";
 import { DRIVER_DOC_TYPES, SERVICE_INTERVAL, VEHICLE_DOC_TYPES, addDays, today } from "../lib";
 import { syncDriverFromDocs, syncVehicleFromDocs } from "../fleetDocs";
 import { scanFleetDocument, type FleetScanResult, type ScanDocType } from "../ai/scanFleetDoc";
-
-type Result = { success: true; id?: string } | { success: false; message: string };
-
-async function run(fn: () => Promise<string | void>): Promise<Result> {
-  try {
-    const id = await fn();
-    revalidatePath("/modules/logistics", "layout");
-    return { success: true, id: id || undefined };
-  } catch (err) {
-    return { success: false, message: err instanceof Error ? err.message : "Terjadi kesalahan." };
-  }
-}
-
-async function guard(check: (a: Awaited<ReturnType<typeof getLogisticsAccess>>["access"]) => boolean) {
-  const { user, access } = await getLogisticsAccess();
-  if (!user) throw new Error("Silakan login terlebih dahulu.");
-  if (!check(access)) throw new Error("Role Anda tidak punya akses untuk aksi ini.");
-  return { user, access };
-}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_FILE = 4 * 1024 * 1024; // batas body Vercel ±4,5 MB
@@ -61,11 +41,8 @@ export async function scanFleetDoc(expected: ScanDocType, imageDataUrl: string):
     if (!isAiConfigured()) return { ok: false, error: "AI belum dikonfigurasi. Isi manual." };
     if (typeof imageDataUrl !== "string" || !/^data:image\/(jpeg|png|webp);base64,/.test(imageDataUrl)) return { ok: false, error: "Scan AI hanya untuk foto (JPG/PNG). PDF diisi manual." };
     if (imageDataUrl.length > 4_000_000) return { ok: false, error: "Gambar terlalu besar." };
-    const usageKey = `ai_scan_usage:${user.id}:${today()}`;
-    const used = await getJson<number>(usageKey, 0);
-    if (used >= DAILY_SCAN_LIMIT) return { ok: false, error: `Batas ${DAILY_SCAN_LIMIT} scan per hari sudah tercapai.` };
+    if (!(await consumeDailyQuota(`ai_scan_usage:${user.id}`, DAILY_SCAN_LIMIT))) return { ok: false, error: `Batas ${DAILY_SCAN_LIMIT} scan per hari sudah tercapai.` };
     const result = await scanFleetDocument(imageDataUrl, expected);
-    await setJson(usageKey, used + 1);
     return { ok: true, result };
   } catch (err) {
     console.error("[logistics scan]", err);
@@ -212,6 +189,7 @@ export async function closeServiceRecord(id: string) {
 export async function recordOfficeP2H(vehicleId: string) {
   return run(async () => {
     const { user } = await guard(a => a.canFleet);
+    await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicleId } });
     const all = { rem: "ok", kemudi: "ok", ban: "ok", lampu: "ok", apar: "ok", wiper: "ok", klakson: "ok", kabin: "ok" };
     await prisma.preTripCheck.create({ data: { vehicleId, at: new Date().toISOString(), resultJson: JSON.stringify(all), notes: `P2H ulang di pool oleh ${user.name}`, source: "Kantor" } });
     return vehicleId;

@@ -2,12 +2,12 @@
 // Tombol status & lokasi tanpa AI; AI hanya untuk foto, suara, dan teks bebas (dibatasi per sopir per hari).
 import { prisma } from "@/lib/prisma";
 import { AiError, aiTranscribeAudio, isAiConfigured } from "@/lib/ai";
-import { getJson, setJson } from "@/lib/kvStore";
 import { downloadFile as tgDownload, sendMessage as tgSend, tg as tgApi, type InlineButton } from "@/lib/telegram";
 import { uploadToStorage } from "@/lib/uploadFile";
-import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES, today } from "../lib";
+import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES } from "../lib";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, haversineKm } from "../trackingLib";
 import { notifyPermission } from "../fleetDocs";
+import { consumeDailyQuota } from "../dbUtil";
 import { scanFleetDocument } from "../ai/scanFleetDoc";
 import { P2H_ITEMS, applyTripStatus, nextActions, recordP2H, stopsTotalOf, type P2HResult } from "../tripOps";
 import { analyzeDriverPhoto, interpretDriverText, parseP2HText } from "./ai";
@@ -41,6 +41,7 @@ const HELP = [
 ].join("\n");
 
 const DAILY_AI_LIMIT = 40;
+const MAX_VOICE_SECONDS = 180;
 
 /** Chat dari Driver simulator di browser (demo tanpa HP): "sim-<driverId>". Tidak ada panggilan ke Telegram. */
 export const isSimChat = (chatId: string) => chatId.startsWith("sim-");
@@ -48,9 +49,10 @@ const sendMessage = (chatId: string, text: string, opts: { inline?: InlineButton
   isSimChat(chatId) ? Promise.resolve({ message_id: 0 }) : tgSend(chatId, text, opts);
 const chatAction = (chatId: string) => (isSimChat(chatId) ? Promise.resolve() : tgApi("sendChatAction", { chat_id: chatId, action: "typing" }).then(() => undefined));
 const ackCallback = (chatId: string, id: string, text?: string) => (isSimChat(chatId) ? Promise.resolve() : tgApi("answerCallbackQuery", { callback_query_id: id, ...(text ? { text } : {}) }).then(() => undefined));
-/** File dari simulator sudah ada di storage: fileId "url:<publicUrl>". */
-async function downloadFile(fileId: string) {
+/** File dari simulator sudah ada di storage: fileId "url:<publicUrl>" (hanya untuk chat simulator — bukan dari Telegram). */
+async function downloadFile(chatId: string, fileId: string) {
   if (fileId.startsWith("url:")) {
+    if (!isSimChat(chatId)) throw new Error("file_id tidak valid.");
     const res = await fetch(fileId.slice(4), { signal: AbortSignal.timeout(20_000) });
     if (!res.ok) throw new Error(`Gagal mengunduh file (${res.status}).`);
     return { bytes: Buffer.from(await res.arrayBuffer()), path: fileId.slice(4) };
@@ -68,18 +70,13 @@ async function reply(chatId: string, ctx: { driverId?: string; tripId?: string |
   await log({ chatId, driverId: ctx.driverId, tripId: ctx.tripId, direction: "out", kind: "text", text, sentBy: "Bot", aiJson: opts.inline?.length ? JSON.stringify({ buttons: opts.inline }) : null });
 }
 
-async function aiQuotaOk(driverId: string) {
-  const key = `ai_bot_usage:${driverId}:${today()}`;
-  const used = await getJson<number>(key, 0);
-  if (used >= DAILY_AI_LIMIT) return false;
-  await setJson(key, used + 1);
-  return true;
-}
+/** Kuota AI per sopir per hari (WIB), atomik. */
+const aiQuotaOk = (driverId: string) => consumeDailyQuota(`ai_bot_usage:${driverId}`, DAILY_AI_LIMIT);
 
 type Ctx = Awaited<ReturnType<typeof loadContext>>;
 
 async function loadContext(chatId: string) {
-  const link = await prisma.chatChannelLink.findFirst({ where: { chatId, active: true }, include: { driver: true } });
+  const link = await prisma.chatChannelLink.findFirst({ where: { chatId, channel: isSimChat(chatId) ? "simulator" : "telegram", active: true }, include: { driver: true } });
   if (!link) return null;
   const trip = await prisma.trip.findFirst({
     where: { driverId: link.driverId, isSimulated: false, status: { in: ACTIVE_TRIP_STATUSES } }, orderBy: { plannedStart: "asc" },
@@ -126,14 +123,19 @@ function aiContext(c: NonNullable<Ctx>) {
 
 // ---------------------------------------------------------
 
-export async function handleTelegramUpdate(update: TgUpdate) {
+/**
+ * `via` memisahkan dua pintu masuk: webhook Telegram (chat.id numerik) dan Driver simulator (chatId "sim-<driverId>").
+ * Update Telegram tidak boleh menyamar sebagai kanal simulator, dan sebaliknya.
+ */
+export async function handleTelegramUpdate(update: TgUpdate, via: "telegram" | "simulator" = "telegram") {
   const cb = update.callback_query;
   const msg = update.message ?? update.edited_message ?? cb?.message;
   if (!msg || msg.chat.type !== "private") return;
   const chatId = String(msg.chat.id);
+  if (via === "telegram" ? !/^\d{1,20}$/.test(chatId) : !isSimChat(chatId)) return;
 
-  // Undangan: /start <kode>
-  if (update.message?.text?.startsWith("/start")) {
+  // Undangan: /start <kode> — hanya dari Telegram asli.
+  if (via === "telegram" && update.message?.text?.startsWith("/start")) {
     const code = update.message.text.split(/\s+/)[1]?.trim();
     if (code) return linkChat(chatId, code, update.message.from);
   }
@@ -163,7 +165,10 @@ export async function handleTelegramUpdate(update: TgUpdate) {
 
   const m = update.message!;
   if (m.photo?.length) return handlePhoto(c, chatId, m);
-  if (m.voice || m.audio) return handleVoice(c, chatId, (m.voice ?? m.audio)!.file_id, m.voice?.mime_type ?? m.audio?.mime_type ?? "audio/ogg");
+  if (m.voice || m.audio) {
+    if ((m.voice?.duration ?? 0) > MAX_VOICE_SECONDS) return reply(chatId, ctx, `Voice note maksimal ${MAX_VOICE_SECONDS / 60} menit. Mohon dipersingkat atau ketik pesannya, Pak.`);
+    return handleVoice(c, chatId, (m.voice ?? m.audio)!.file_id, m.voice?.mime_type ?? m.audio?.mime_type ?? "audio/ogg");
+  }
   if (m.document) {
     await log({ chatId, ...ctx, direction: "in", kind: "text", text: `[file] ${m.document.file_name ?? ""}` });
     return reply(chatId, ctx, "Untuk foto dokumen, kirim sebagai Foto (bukan File) supaya bisa dibaca otomatis.");
@@ -179,7 +184,7 @@ export async function handleTelegramUpdate(update: TgUpdate) {
 
 async function linkChat(chatId: string, code: string, from?: TgUser) {
   const link = await prisma.chatChannelLink.findUnique({ where: { inviteCode: code }, include: { driver: true } });
-  if (!link || !link.active || (link.chatId && link.chatId !== chatId) || link.inviteExpiresAt < nowIso()) {
+  if (!link || link.channel !== "telegram" || !link.active || (link.chatId && link.chatId !== chatId) || link.inviteExpiresAt < nowIso()) {
     await sendMessage(chatId, "Link undangan tidak valid atau sudah kedaluwarsa. Minta link baru ke Fleet Manager.");
     return;
   }
@@ -213,11 +218,13 @@ async function handleCallback(c: NonNullable<Ctx>, chatId: string, cbId: string,
   if (kind === "task") { await answer(); return reply(chatId, ctx, tripText(c), { inline: await tripButtons(c) }); }
   if (!c.trip || c.trip.id !== tripId) { await answer("Trip ini sudah tidak aktif."); return; }
   if (kind === "p2hok") {
-    await answer("P2H dicatat");
     const all = Object.fromEntries(P2H_ITEMS.map(i => [i.key, "ok"])) as P2HResult;
     await log({ chatId, ...ctx, direction: "in", kind: "button", text: "P2H: semua OK" });
-    await recordP2H(c.trip.id, all, "", c.driver.name);
+    const res = await recordP2H(c.trip.id, all, "", c.driver.name, isSimChat(chatId) ? "Simulator" : "Telegram");
     await setState(c, {});
+    // Tombol lama yang ditekan setelah berangkat: jangan bilang "P2H lolos".
+    if (res.status === "late") { await answer(); return reply(chatId, ctx, "Trip sudah berjalan, jadi P2H tidak diubah lagi.", { inline: await tripButtons(c) }); }
+    await answer("P2H dicatat");
     const fresh = (await loadContext(chatId))!;
     return reply(chatId, ctx, "✅ P2H lolos, semua item OK. Hati-hati di jalan, Pak!", { inline: await tripButtons(fresh) });
   }
@@ -255,7 +262,7 @@ async function askP2H(c: NonNullable<Ctx>, chatId: string) {
 async function handleP2HText(c: NonNullable<Ctx>, chatId: string, text: string) {
   const ctx = { driverId: c.driver.id, tripId: c.trip!.id };
   const { result, notes, model } = await parseP2HText(text);
-  const res = await recordP2H(c.trip!.id, result, notes, c.driver.name);
+  const res = await recordP2H(c.trip!.id, result, notes, c.driver.name, isSimChat(chatId) ? "Simulator" : "Telegram");
   await prisma.chatMessage.updateMany({ where: { chatId, direction: "in", at: { gte: new Date(Date.now() - 120_000).toISOString() }, aiJson: null }, data: { aiJson: JSON.stringify({ p2h: result, notes, model }) } });
   if (res.status === "late") { await setState(c, {}); return reply(chatId, ctx, "Trip sudah berjalan, jadi P2H tidak diubah lagi. Laporkan masalah kendaraan dengan pesan biasa (mis. \"ban bocor\")."); }
   if (res.status === "incomplete") return reply(chatId, ctx, `Item kritis belum disebut: ${res.unknown.join(", ")}. Mohon sebutkan kondisinya juga.`);
@@ -305,7 +312,7 @@ async function handleVoice(c: NonNullable<Ctx>, chatId: string, fileId: string, 
   if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Silakan ketik atau pakai tombol menu.");
   await chatAction(chatId).catch(() => {});
   try {
-    const { bytes } = await downloadFile(fileId);
+    const { bytes } = await downloadFile(chatId, fileId);
     const { text, model, via } = await aiTranscribeAudio(bytes.toString("base64"), mime.includes("ogg") || !mime ? "audio/ogg" : mime);
     await log({ chatId, ...ctx, direction: "in", kind: "voice", text: text || "(tidak ada ucapan)", aiJson: JSON.stringify({ model, via }) });
     if (!text) return reply(chatId, ctx, "Maaf, suaranya tidak terdengar jelas. Coba ulangi atau ketik pesannya.");
@@ -323,7 +330,7 @@ async function handlePhoto(c: NonNullable<Ctx>, chatId: string, m: TgMessage) {
   const photo = [...m.photo!].sort((a, b) => b.width * b.height - a.width * a.height).find(p => (p.file_size ?? 0) < 4_000_000) ?? m.photo![0];
   let fileUrl: string | null = null;
   try {
-    const { bytes } = await downloadFile(photo.file_id);
+    const { bytes } = await downloadFile(chatId, photo.file_id);
     fileUrl = photo.file_id.startsWith("url:") ? photo.file_id.slice(4)
       : await uploadToStorage(`logistics/telegram/${c.driver.id}`, new File([new Uint8Array(bytes)], `tg-${Date.now()}.jpg`, { type: "image/jpeg" }));
     await log({ chatId, ...ctx, direction: "in", kind: "photo", text: m.caption ?? null, fileUrl });

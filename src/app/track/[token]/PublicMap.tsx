@@ -13,5 +13,5 @@ export default function PublicMap({ lat, lng, status, plateNo, path }: { lat: nu
     const t = setInterval(() => router.refresh(), 60_000);
     return () => clearInterval(t);
   }, [router]);
-  return <FleetMap height={320} units={[{ id: "me", plateNo, status, lat, lng, path, popupHtml: plateNo }]} fitKey="me" />;
+  return <FleetMap height={320} units={[{ id: "me", plateNo, status, lat, lng, path, popupHtml: plateNo.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`) }]} fitKey="me" />;
 }

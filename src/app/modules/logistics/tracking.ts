@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { qualifiesFor, driverFlags, today } from "./lib";
 import { readiness, vehicleConditions, vehicleRuleInclude } from "./dispatchRules";
+import { tryWithLock } from "./dbUtil";
 import {
   ACTIVE_TRIP_STATUSES, DRIVING_STATUSES, TRIP_STATUSES, firstUnloadMin, fullPath, haversineKm, parsePlan, pathKm, phaseStarts, planTotal,
   positionAt, splitPath, type LatLng, type Phase, type TripPlan,
@@ -218,7 +219,11 @@ async function loadTrip(id: string) {
 }
 type LoadedTrip = Awaited<ReturnType<typeof loadTrip>>;
 
-/** Trip simulasi: catat fase yang sudah dimulai sebagai TripEvent, perbarui status, dan kirim ping posisi. */
+/**
+ * Trip simulasi: catat fase yang sudah dimulai sebagai TripEvent, perbarui status, dan kirim ping posisi.
+ * Dipanggil tiap polling dashboard & link publik; beberapa request bisa datang bersamaan, jadi penulisan
+ * dilakukan di bawah advisory lock per trip dan jumlah event dihitung ulang di dalamnya (tanpa event ganda).
+ */
 async function advanceTrip(trip: LoadedTrip): Promise<LoadedTrip> {
   if (!trip.isSimulated) return trip;
   const plan = parsePlan(trip.planJson);
@@ -226,31 +231,41 @@ async function advanceTrip(trip: LoadedTrip): Promise<LoadedTrip> {
   const elapsed = elapsedPlanMin(trip, now);
   const pos = positionAt(plan, elapsed);
   const starts = phaseStarts(plan);
-  const writes: Promise<unknown>[] = [];
-  const phaseEvents = trip.events.filter(e => e.source === "Simulasi").length;
-  const upto = Math.min(pos.phaseIndex, plan.phases.length - 1);
-  for (let i = phaseEvents; i <= upto; i++) {
-    const ph = plan.phases[i];
-    writes.push(prisma.tripEvent.create({ data: { tripId: trip.id, status: ph.status, label: ph.label, at: new Date(realAt(trip, starts[i])).toISOString(), lat: ph.path[0][0], lng: ph.path[0][1], source: "Simulasi" } }));
-  }
-  if (pos.done && phaseEvents <= plan.phases.length) {
-    writes.push(prisma.tripEvent.create({ data: { tripId: trip.id, status: "Completed", label: "Tiba di pool — trip selesai", at: new Date(realAt(trip, planTotal(plan))).toISOString(), lat: pos.lat, lng: pos.lng, source: "Simulasi" } }));
-  }
-  const silent = plan.silentAfterMin != null && elapsed >= plan.silentAfterMin;
-  const lastPing = trip.lastPingAt ? Date.parse(trip.lastPingAt) : 0;
-  const ping = !silent && !pos.done && now - lastPing > 40_000;
-  if (ping) writes.push(prisma.locationPing.create({ data: { tripId: trip.id, vehicleId: trip.vehicleId, driverId: trip.driverId, lat: pos.lat, lng: pos.lng, speedKmh: pos.speedKmh, at: new Date(now).toISOString(), source: "Simulasi" } }));
-  const status = pos.done ? "Completed" : pos.status;
-  const data: Record<string, unknown> = {};
-  if (status !== trip.status) data.status = status;
-  if (pos.stopsDone !== trip.stopsDone) data.stopsDone = pos.stopsDone;
-  if (!trip.startedAt && status !== "Scheduled") data.startedAt = new Date(realAt(trip, starts[plan.phases.findIndex(p => p.status === "ToLoad")])).toISOString();
-  if (pos.done && !trip.completedAt) data.completedAt = new Date(realAt(trip, planTotal(plan))).toISOString();
-  if (ping) Object.assign(data, { lastLat: pos.lat, lastLng: pos.lng, lastPingAt: new Date(now).toISOString(), lastSpeedKmh: pos.speedKmh });
-  if (Object.keys(data).length) writes.push(prisma.trip.update({ where: { id: trip.id }, data }));
-  if (!writes.length) return trip;
-  await Promise.all(writes);
-  return loadTrip(trip.id);
+  const wrote = await tryWithLock(`logistics:sim-trip:${trip.id}`, async tx => {
+    const cur = await tx.trip.findUnique({ where: { id: trip.id }, select: { status: true, stopsDone: true, startedAt: true, completedAt: true, lastPingAt: true } });
+    if (!cur) return false; // simulasi baru saja di-reset
+    let n = 0;
+    const phaseEvents = await tx.tripEvent.count({ where: { tripId: trip.id, source: "Simulasi" } });
+    const upto = Math.min(pos.phaseIndex, plan.phases.length - 1);
+    const events: { tripId: string; status: string; label: string; at: string; lat: number; lng: number; source: string }[] = [];
+    for (let i = phaseEvents; i <= upto; i++) {
+      const ph = plan.phases[i];
+      events.push({ tripId: trip.id, status: ph.status, label: ph.label, at: new Date(realAt(trip, starts[i])).toISOString(), lat: ph.path[0][0], lng: ph.path[0][1], source: "Simulasi" });
+    }
+    if (pos.done && phaseEvents <= plan.phases.length) {
+      events.push({ tripId: trip.id, status: "Completed", label: "Tiba di pool — trip selesai", at: new Date(realAt(trip, planTotal(plan))).toISOString(), lat: pos.lat, lng: pos.lng, source: "Simulasi" });
+    }
+    if (events.length) { n += events.length; await tx.tripEvent.createMany({ data: events }); }
+    const silent = plan.silentAfterMin != null && elapsed >= plan.silentAfterMin;
+    const lastPing = cur.lastPingAt ? Date.parse(cur.lastPingAt) : 0;
+    const ping = !silent && !pos.done && now - lastPing > 40_000;
+    if (ping) {
+      n++;
+      await tx.locationPing.create({ data: { tripId: trip.id, vehicleId: trip.vehicleId, driverId: trip.driverId, lat: pos.lat, lng: pos.lng, speedKmh: pos.speedKmh, at: new Date(now).toISOString(), source: "Simulasi" } });
+    }
+    const status = pos.done ? "Completed" : pos.status;
+    const data: Record<string, unknown> = {};
+    if (status !== cur.status) data.status = status;
+    if (pos.stopsDone !== cur.stopsDone) data.stopsDone = pos.stopsDone;
+    if (!cur.startedAt && status !== "Scheduled") data.startedAt = new Date(realAt(trip, starts[plan.phases.findIndex(p => p.status === "ToLoad")])).toISOString();
+    if (pos.done && !cur.completedAt) data.completedAt = new Date(realAt(trip, planTotal(plan))).toISOString();
+    if (ping) Object.assign(data, { lastLat: pos.lat, lastLng: pos.lng, lastPingAt: new Date(now).toISOString(), lastSpeedKmh: pos.speedKmh });
+    if (Object.keys(data).length) { n++; await tx.trip.update({ where: { id: trip.id }, data }); }
+    return n > 0;
+  }).catch(err => { console.error("[tracking] advance", err); return false; });
+  // Kunci dipegang request lain / tidak ada perubahan: pakai data terakhir dari DB.
+  if (wrote === false) return trip;
+  return (await prisma.trip.findUnique({ where: { id: trip.id }, include: tripInclude })) ?? trip;
 }
 
 export type UnitAlert = { level: "red" | "amber"; code: string; text: string };
@@ -370,6 +385,8 @@ export async function getFleetSnapshot(): Promise<FleetSnapshot> {
   return { at: new Date(now).toISOString(), units, idle, simulation: { running: !!sim, speed: sim?.simSpeed ?? null } };
 }
 
+const PUBLIC_EVENT_STATUSES = ["ToLoad", "Loading", "InTransit", "Unloading", "Returning", "Completed"];
+
 /** Data link tracking publik per order (token acak). Tanpa nomor HP sopir dan tanpa data internal. */
 export async function getPublicTracking(token: string) {
   if (!/^[a-f0-9]{16,64}$/.test(token)) return null;
@@ -385,7 +402,9 @@ export async function getPublicTracking(token: string) {
     trip: unit && {
       status: unit.status, statusLabel: unit.statusLabel, plateNo: unit.plateNo, driverFirstName: unit.driverName.split(" ")[0], lat: unit.lat, lng: unit.lng, lastPingAt: unit.lastPingAt,
       etaFirstStop: unit.etaFirstStop, promisedArrival: unit.promisedArrival, stopsDone: unit.stopsDone, stopsTotal: unit.stopsTotal, path: unit.path,
-      timeline: unit.timeline.filter(e => !/berhenti/i.test(e.label)).map(e => ({ label: e.label, at: e.at, status: e.status })),
+      // Hanya event status perjalanan. Event internal (assign + nama dispatcher, override & alasan, P2H, laporan
+      // sopir, foto, pembatalan) tidak boleh terlihat oleh klien.
+      timeline: unit.timeline.filter(e => PUBLIC_EVENT_STATUSES.includes(e.status) && !/berhenti/i.test(e.label)).map(e => ({ label: e.label, at: e.at, status: e.status })),
     },
   };
 }

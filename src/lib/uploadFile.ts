@@ -9,7 +9,10 @@ export async function uploadToStorage(
   file: File,
   fileName?: string
 ): Promise<string> {
-  const ext = file.name.includes(".") ? "." + file.name.split(".").pop() : "";
+  // Ekstensi dari nama file kiriman browser: hanya huruf/angka, supaya nama seperti "x.png/../../lain.pdf"
+  // tidak bisa menulis (upsert) ke path lain di bucket.
+  const rawExt = file.name.includes(".") ? file.name.split(".").pop()!.toLowerCase() : "";
+  const ext = /^[a-z0-9]{1,8}$/.test(rawExt) ? "." + rawExt : "";
   const name =
     fileName || `${Date.now()}_${Math.random().toString(36).substring(7)}${ext}`;
   const storagePath = `${folder}/${name}`;

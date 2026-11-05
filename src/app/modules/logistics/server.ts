@@ -1,7 +1,9 @@
 // Helper server modul Logistik (dipakai server actions, halaman, route dokumen, dan AI).
 // Sengaja bukan "use server": fungsi di sini tidak boleh bisa dipanggil langsung dari browser.
 import crypto from "crypto";
+import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { withLock, type Tx } from "./dbUtil";
 import { getCurrentUser, getRolesConfig, type CurrentUser } from "@/app/actions/auth";
 import type { DocBrand } from "@/app/modules/sales/documents/model";
 import { computeCharterPrice, logisticsAccess, today, type LogisticsAccess, type PriceInput, type RateTable } from "./lib";
@@ -15,11 +17,30 @@ type Need = "view" | "order" | "dispatch" | "fleet" | "rates" | "finance";
 
 /** Server action tidak terlindungi middleware: cek login & izin di setiap aksi. */
 export async function guardLogistics(need: Need = "view"): Promise<CurrentUser> {
+  const { user } = await guardAccess(a => ({ view: a.canView, order: a.canOrder, dispatch: a.canDispatch, fleet: a.canFleet, rates: a.canRates, finance: a.canFinance }[need]));
+  return user;
+}
+
+/** Guard dengan aturan bebas (mis. a => a.canFleet || a.canFinance). */
+export async function guardAccess(check: (a: LogisticsAccess) => boolean, message = "Role Anda tidak punya akses untuk aksi ini.") {
   const { user, access } = await getLogisticsAccess();
   if (!user) throw new Error("Silakan login terlebih dahulu.");
-  const ok = { view: access.canView, order: access.canOrder, dispatch: access.canDispatch, fleet: access.canFleet, rates: access.canRates, finance: access.canFinance }[need];
-  if (!ok) throw new Error("Role Anda tidak punya akses untuk aksi ini.");
-  return user;
+  if (!check(access)) throw new Error(message);
+  return { user, access };
+}
+
+export type ActionResult = { success: true; id?: string } | { success: false; message: string };
+
+/** Pembungkus server action: error → pesan, sukses → revalidate layout Logistik. */
+export async function runAction(fn: () => Promise<string | void>, opts: { uniqueMessage?: string } = {}): Promise<ActionResult> {
+  try {
+    const id = await fn();
+    revalidatePath("/modules/logistics", "layout");
+    return { success: true, id: id || undefined };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Terjadi kesalahan.";
+    return { success: false, message: opts.uniqueMessage && msg.includes("Unique constraint") ? opts.uniqueMessage : msg };
+  }
 }
 
 export function addHistory(json: string, userName: string, action: string) {
@@ -45,9 +66,9 @@ export async function getRateTable(): Promise<RateTable> {
 }
 
 /** Nomor order: ATN/ORD/2026/11/0001 — urut per tahun. */
-export async function nextOrderNo(date: string) {
+export async function nextOrderNo(date: string, db: Tx | typeof prisma = prisma) {
   const prefix = `ATN/ORD/${date.slice(0, 4)}/`;
-  const rows = await prisma.charterOrder.findMany({ where: { orderNo: { startsWith: prefix } }, select: { orderNo: true } });
+  const rows = await db.charterOrder.findMany({ where: { orderNo: { startsWith: prefix } }, select: { orderNo: true } });
   const max = rows.reduce((m, r) => Math.max(m, Number(r.orderNo.split("/").pop()) || 0), 0);
   return `${prefix}${date.slice(5, 7)}/${String(max + 1).padStart(4, "0")}`;
 }
@@ -98,12 +119,13 @@ export async function orderData(input: OrderInput) {
 export async function insertOrder(user: { name: string }, input: OrderInput) {
   const { fields, stops } = await orderData(input);
   const source = input.source ?? "Manual";
-  return prisma.charterOrder.create({ data: {
-    ...fields, orderNo: await nextOrderNo(today()), status: "Draft", source, aiNote: input.aiNote || null,
+  // Nomor dibaca & dipakai di dalam satu kunci supaya dua order bersamaan tidak bentrok nomor.
+  return withLock("logistics:order-no", async tx => tx.charterOrder.create({ data: {
+    ...fields, orderNo: await nextOrderNo(today(), tx), status: "Draft", source, aiNote: input.aiNote || null,
     trackingToken: crypto.randomBytes(12).toString("hex"), createdBy: user.name, createdAt: new Date().toISOString(),
     historyJson: addHistory("[]", user.name, source === "Manual" ? "Order dibuat" : `Order dibuat dari ${source.toLowerCase()} (draft AI, diperiksa user)`),
     stops: { create: stops },
-  } });
+  } }));
 }
 
 /** Kop dokumen dari CompanyProfile "logistics" (PT Arunika Trans Nusantara). */

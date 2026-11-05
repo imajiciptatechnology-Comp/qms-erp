@@ -13,7 +13,7 @@ import { aiFleetSummary, fetchFleetSnapshot, runSimulation, stopSimulation } fro
 const FleetMap = dynamic(() => import("./FleetMap"), { ssr: false, loading: () => <div className="h-[460px] rounded-lg border border-slate-200 bg-slate-50 animate-pulse" /> });
 
 const REFRESH_MS = 30_000;
-const hm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "—");
+const hm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "—");
 const ago = (iso: string | null, now: number) => {
   if (!iso) return "—";
   const m = Math.round((now - Date.parse(iso)) / 60_000);
