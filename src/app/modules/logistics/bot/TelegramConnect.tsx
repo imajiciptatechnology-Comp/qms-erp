@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Copy, Link2, Loader2, Send, Unlink } from "lucide-react";
 import { btnPrimary, btnSecondary } from "../ui";
-import { createTelegramInvite, unlinkTelegram } from "./actions";
+import { createTelegramInvite, sendDriverMessage, unlinkTelegram } from "./actions";
 
 /** Hubungkan sopir ke bot Telegram (rancangan 10.3 langkah 1): link undangan sekali pakai. */
 export default function TelegramConnect({ driverId, driverName, linked, configured, canManage }: {
@@ -55,5 +55,22 @@ export default function TelegramConnect({ driverId, driverName, linked, configur
       )}
       {error && <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
     </div>
+  );
+}
+
+/** Kirim pesan ke chat pribadi sopir (lewat bot Telegram / Driver simulator). */
+export function PersonalMessageForm({ driverId }: { driverId: string }) {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, start] = useTransition();
+  return (
+    <form className="mt-3 space-y-1.5" onSubmit={e => { e.preventDefault(); start(async () => { setError(null); const r = await sendDriverMessage(driverId, text, true); if (r.ok) { setText(""); router.refresh(); } else setError(r.error); }); }}>
+      <div className="flex gap-2">
+        <input value={text} onChange={e => setText(e.target.value)} maxLength={1000} placeholder="Pesan pribadi ke sopir…" aria-label="Pesan pribadi ke sopir" className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+        <button type="submit" disabled={busy || !text.trim()} className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-60">Send</button>
+      </div>
+      {error && <p className="text-xs text-red-700">{error}</p>}
+    </form>
   );
 }

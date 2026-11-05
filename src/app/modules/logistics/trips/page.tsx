@@ -5,6 +5,7 @@ import { TRIP_STATUSES } from "../trackingLib";
 import { LEVEL_LABEL, type OverrideLevel } from "../dispatchRules";
 import { today } from "../lib";
 import { Card } from "../ui";
+import BulkDelete from "../BulkDelete";
 
 const th = "text-left font-semibold px-4 py-2.5 whitespace-nowrap";
 const td = "px-4 py-2.5 align-top";
@@ -27,12 +28,15 @@ export default async function TripsPage({ searchParams }: { searchParams: Promis
       {flash && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">{flash}</p>}
       <Card title={`Trips (${trips.length})`} actions={access.canDispatch ? <Link href="/modules/logistics/dispatch" className="text-sm text-blue-700 hover:underline">Dispatch board</Link> : null}>
         {trips.length === 0 ? <p className="text-sm text-slate-500">Belum ada trip. Assign order Confirmed di papan Dispatch.</p> : (
-          <div className="overflow-x-auto -mx-5">
+          <>
+          {access.isSuperAdmin && <BulkDelete formId="bulk-trips" kind="trip" />}
+          <form id="bulk-trips" className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
-              <thead className="text-xs uppercase text-slate-500 bg-slate-50"><tr>{["Trip", "Order · klien", "Truk", "Sopir", "Jadwal", "Status", "Surat Jalan", "Override"].map(h => <th key={h} className={th}>{h}</th>)}</tr></thead>
+              <thead className="text-xs uppercase text-slate-500 bg-slate-50"><tr>{access.isSuperAdmin && <th className={th}><input type="checkbox" data-select-all aria-label="Pilih semua trip" /></th>}{["Trip", "Order · klien", "Truk", "Sopir", "Jadwal", "Status", "Surat Jalan", "Override"].map(h => <th key={h} className={th}>{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {trips.map(t => (
                   <tr key={t.id}>
+                    {access.isSuperAdmin && <td className={td}><input type="checkbox" name="ids" value={t.id} aria-label={`Pilih ${t.tripNo}`} /></td>}
                     <td className={`${td} whitespace-nowrap`}><Link href={`/modules/logistics/trips/${t.id}`} className="font-medium text-blue-700 hover:underline">{t.tripNo}</Link></td>
                     <td className={td}>{t.order?.orderNo ?? "—"}<span className="block text-xs text-slate-500">{t.client?.name ?? ""} · {t.route?.code}</span></td>
                     <td className={`${td} whitespace-nowrap`}>{t.vehicle.plateNo}</td>
@@ -45,7 +49,8 @@ export default async function TripsPage({ searchParams }: { searchParams: Promis
                 ))}
               </tbody>
             </table>
-          </div>
+          </form>
+          </>
         )}
       </Card>
 

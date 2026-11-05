@@ -180,13 +180,15 @@ const MOVING = ["ToLoad", "Loading", "InTransit", "Unloading", "Returning"];
  */
 export async function deleteTripRecord(tripId: string, reason: string, by: { name: string; role: string; isSuperAdmin: boolean }) {
   const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, include: { vehicle: { select: { plateNo: true } } } });
-  if (MOVING.includes(trip.status)) throw new Error("Trip sedang berjalan — tidak bisa dihapus. Selesaikan atau tunggu trip selesai.");
+  if (MOVING.includes(trip.status) && !by.isSuperAdmin) throw new Error("Trip sedang berjalan — hanya Super Admin yang bisa menghapus.");
   if (trip.status === "Completed" && !by.isSuperAdmin) throw new Error("Trip yang sudah selesai hanya bisa dihapus Super Admin (jejak audit).");
   const now = new Date().toISOString();
   const checks = await prisma.preTripCheck.findMany({ where: { tripId }, select: { resultJson: true } });
   await prisma.$transaction(async tx => {
     await tx.preTripCheck.deleteMany({ where: { tripId } });
-    await tx.trip.delete({ where: { id: tripId } }); // event, ping, override ikut (cascade); chat tetap (tripId → null)
+    // Chat log trip ikut dihapus (kalau dibiarkan, tripId jadi null dan pesan trip nyasar ke chat pribadi sopir).
+    await tx.chatMessage.deleteMany({ where: { tripId } });
+    await tx.trip.delete({ where: { id: tripId } }); // event, ping, override ikut (cascade)
     if (trip.orderId) {
       const order = await tx.charterOrder.findUnique({ where: { id: trip.orderId } });
       if (order) {

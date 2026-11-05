@@ -39,13 +39,14 @@ export async function unlinkTelegram(driverId: string) {
 }
 
 /** Dispatcher → sopir lewat bot. */
-export async function sendDriverMessage(driverId: string, text: string) {
+/** Kantor → sopir. `personal` = masuk chat pribadi (tidak ditempel ke trip aktif). */
+export async function sendDriverMessage(driverId: string, text: string, personal = false) {
   try {
     const user = await guard(a => a.canDispatch);
     const body = text.trim();
     if (!body) throw new Error("Pesan kosong.");
     if (body.length > 1000) throw new Error("Pesan terlalu panjang (maks. 1000 karakter).");
-    const trip = await prisma.trip.findFirst({ where: { driverId, isSimulated: false, status: { notIn: ["Completed", "Cancelled"] } }, select: { id: true } });
+    const trip = personal ? null : await prisma.trip.findFirst({ where: { driverId, isSimulated: false, status: { notIn: ["Completed", "Cancelled"] } }, select: { id: true } });
     const sent = await sendToDriver(driverId, `📣 Pesan dari kantor (${user.name}):\n${body}`, { sentBy: user.name, tripId: trip?.id });
     if (!sent) throw new Error("Sopir ini belum terhubung (Telegram / Driver simulator).");
     return { ok: true as const };
@@ -57,7 +58,9 @@ export type ChatFeedItem = { id: string; driverId: string | null; driverName: st
 export async function getChatFeed(driverId?: string | null): Promise<{ ok: true; items: ChatFeedItem[] } | { ok: false; error: string }> {
   try {
     await guard(a => a.canView);
-    const rows = await prisma.chatMessage.findMany({ where: driverId ? { driverId } : {}, orderBy: { at: "desc" }, take: 60, include: { driver: { select: { name: true } } } });
+    // Per sopir: percakapan sekarang saja (sejak pesan penutup trip terakhir, termasuk pesan itu). Riwayat lama ada di catatan trip / chat pribadi.
+    const lastClose = driverId ? await prisma.chatMessage.findFirst({ where: { driverId, kind: "close" }, orderBy: { at: "desc" }, select: { at: true } }) : null;
+    const rows = await prisma.chatMessage.findMany({ where: driverId ? { driverId, ...(lastClose ? { at: { gte: lastClose.at } } : {}) } : {}, orderBy: { at: "desc" }, take: 60, include: { driver: { select: { name: true } } } });
     return { ok: true, items: rows.reverse().map(r => ({ id: r.id, driverId: r.driverId, driverName: r.driver?.name ?? null, direction: r.direction, kind: r.kind, text: r.text, fileUrl: r.fileUrl, sentBy: r.sentBy, at: r.at })) };
   } catch (err) { return fail(err); }
 }

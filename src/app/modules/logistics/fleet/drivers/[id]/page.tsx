@@ -8,7 +8,8 @@ import { Card, InfoRow } from "../../../ui";
 import { DocTable, Tabs } from "../../DocTable";
 import { AddDocumentForm } from "../../DocumentForms";
 import { isTelegramConfigured } from "@/lib/telegram";
-import TelegramConnect from "../../../bot/TelegramConnect";
+import TelegramConnect, { PersonalMessageForm } from "../../../bot/TelegramConnect";
+import ChatLog from "../../../bot/ChatLog";
 import { DriverForm } from "../../MasterForms";
 
 export default async function DriverDetail({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string }> }) {
@@ -21,7 +22,12 @@ export default async function DriverDetail({ params, searchParams }: { params: P
     prisma.truckType.findMany({ orderBy: { sortOrder: "asc" } }),
   ]);
   if (!d) notFound();
-  const link = await prisma.chatChannelLink.findFirst({ where: { driverId: d.id, active: true, chatId: { not: null } }, orderBy: { linkedAt: "desc" } });
+  const [link, personalDesc] = await Promise.all([
+    prisma.chatChannelLink.findFirst({ where: { driverId: d.id, active: true, chatId: { not: null } }, orderBy: { linkedAt: "desc" } }),
+    // Chat pribadi = pesan di luar trip (tidak terikat trip mana pun), terbaru 200.
+    prisma.chatMessage.findMany({ where: { driverId: d.id, tripId: null }, orderBy: { at: "desc" }, take: 200, select: { id: true, at: true, direction: true, kind: true, text: true, fileUrl: true, sentBy: true, channel: true } }),
+  ]);
+  const personal = personalDesc.reverse();
   const flags = driverFlags(d);
   const base = `/modules/logistics/fleet/drivers/${d.id}`;
   const drafts = d.documents.filter(x => x.status === "Draft").length;
@@ -56,6 +62,10 @@ export default async function DriverDetail({ params, searchParams }: { params: P
               </span>
             </InfoRow>
             {d.notes && <InfoRow label="Catatan">{d.notes}</InfoRow>}
+          </Card>
+          <Card title="Personal chat" actions={<span className="text-xs text-slate-500">Di luar trip · chat trip tersimpan di catatan trip</span>}>
+            <ChatLog rows={personal} driverName={d.name} empty="Belum ada pesan di luar trip." />
+            {access.canDispatch && <PersonalMessageForm driverId={d.id} />}
           </Card>
           <Card title="Telegram bot" actions={<Link href={`/modules/logistics/p2h?driver=${d.id}`} className="text-sm text-blue-700 hover:underline">P2H records</Link>}>
             <TelegramConnect driverId={d.id} driverName={d.name} configured={isTelegramConfigured()} canManage={access.canFleet}

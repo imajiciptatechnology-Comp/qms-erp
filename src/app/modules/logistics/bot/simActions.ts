@@ -109,7 +109,9 @@ export type SimMessage = { id: string; direction: string; kind: string; text: st
 export async function simFeed(driverId: string): Promise<{ ok: true; messages: SimMessage[] } | { ok: false; error: string }> {
   try {
     await guard();
-    const rows = await prisma.chatMessage.findMany({ where: { chatId: chatIdOf(driverId) }, orderBy: { at: "desc" }, take: 80 });
+    // Layar sopir di-reset setiap trip selesai: tampil mulai dari pesan penutup trip terakhir.
+    const lastClose = await prisma.chatMessage.findFirst({ where: { chatId: chatIdOf(driverId), kind: "close" }, orderBy: { at: "desc" }, select: { at: true } });
+    const rows = await prisma.chatMessage.findMany({ where: { chatId: chatIdOf(driverId), ...(lastClose ? { at: { gte: lastClose.at } } : {}) }, orderBy: { at: "desc" }, take: 80 });
     return {
       ok: true,
       messages: rows.reverse().map(r => {

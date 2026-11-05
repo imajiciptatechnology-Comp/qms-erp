@@ -8,6 +8,7 @@ import { TRIP_STATUSES, gmapsPoint } from "../../trackingLib";
 import { Card, DocLinks, InfoRow } from "../../ui";
 import { OverrideForm, ShareLocation, SjHandoverForm, TripActions } from "./TripControls";
 import P2HCard from "./P2HCard";
+import ChatLog from "../../bot/ChatLog";
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "—");
 
@@ -26,6 +27,8 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
   const duty = trip.dutyAckJson ? (JSON.parse(trip.dutyAckJson) as { by: string; at: string; warnings: string[] }) : null;
   const preDeparture = trip.status === "Scheduled";
   const handover = [...trip.events].reverse().find(e => e.status === "SJHandover") ?? null;
+  // Catatan chat trip: semua pesan bot ↔ sopir ↔ kantor selama trip ini (Telegram & simulator).
+  const chat = trip.isSimulated ? [] : await prisma.chatMessage.findMany({ where: { tripId: trip.id }, orderBy: { at: "asc" }, take: 500, select: { id: true, at: true, direction: true, kind: true, text: true, fileUrl: true, sentBy: true, channel: true } });
 
   return (
     <div className="space-y-6">
@@ -99,6 +102,12 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
                     : <p className="text-xs text-slate-500">Form serah terima muncul setelah P2H lolos dan Surat Jalan terbit. Tombol Berangkat sopir terkunci sampai serah terima dicatat.</p>}
                 </div>
               )}
+            </Card>
+          )}
+
+          {!trip.isSimulated && (
+            <Card title={`Chat log (${chat.length})`} actions={<span className="text-xs text-slate-500">Percakapan bot ↔ sopir ↔ kantor selama trip ini</span>}>
+              <ChatLog rows={chat} driverName={trip.driver.name} empty="Belum ada chat untuk trip ini." />
             </Card>
           )}
 

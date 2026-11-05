@@ -3,7 +3,9 @@
 // tombol itu tetap bekerja seperti biasa. Bukan "use server" — hanya dipanggil dari kode server.
 import { prisma } from "@/lib/prisma";
 import type { InlineButton } from "@/lib/telegram";
-import { sendToDriver } from "./telegramBot";
+import { closeTripChat, sendToDriver } from "./telegramBot";
+
+export { closeTripChat };
 import { gmapsDirections, parsePlan } from "../trackingLib";
 
 const wib = (iso: string | null | undefined, withDay = true) =>
@@ -73,7 +75,9 @@ export async function notifyDriverSuratJalan(tripId: string, by: string): Promis
 export async function notifyDriverCancelled(tripId: string, reason: string, by: string): Promise<boolean> {
   const t = await prisma.trip.findUnique({ where: { id: tripId }, include: { vehicle: true } });
   if (!t) return false;
-  const sent = await sendToDriver(t.driverId, `❌ Tugas ${t.tripNo} (${t.vehicle.plateNo}) DIBATALKAN oleh kantor (${by}).\nAlasan: ${reason.slice(0, 300)}\nTidak perlu berangkat. Tunggu tugas berikutnya di chat ini.`, { sentBy: by, tripId }).catch(() => false);
+  const links = await prisma.chatChannelLink.count({ where: { driverId: t.driverId, active: true, chatId: { not: null } } });
+  await closeTripChat(t.driverId, tripId, `❌ Tugas ${t.tripNo} (${t.vehicle.plateNo}) DIBATALKAN oleh kantor (${by}).\nAlasan: ${reason.slice(0, 300)}\nTidak perlu berangkat. Percakapan trip ini ditutup; pesan berikutnya masuk chat pribadi.`, by);
+  const sent = links > 0;
   await noteOnTrip(t.id, sent, "Kabar pembatalan", by);
   return sent;
 }

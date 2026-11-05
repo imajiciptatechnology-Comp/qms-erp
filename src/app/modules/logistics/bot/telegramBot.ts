@@ -270,6 +270,10 @@ async function handleCallback(c: NonNullable<Ctx>, chatId: string, cbId: string,
       const fresh = (await loadContext(chatId))!;
       const done = to === "Completed";
       const extra = to === "ToLoad" ? "\nJangan lupa bagikan 📍 Lokasi Live (📎 → Lokasi) selama perjalanan." : to === "Unloading" ? "\nSetelah bongkar, kirim 📷 foto surat jalan bertanda tangan penerima." : "";
+      if (done) {
+        await reply(chatId, ctx, `✔️ ${label} — tercatat ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}.\nTerima kasih, trip selesai. Istirahat yang cukup, Pak.`);
+        return closeTripChat(c.driver.id, c.trip.id, `🏁 Trip ${c.trip.tripNo} selesai — percakapan trip ini ditutup & tersimpan di catatan trip.\nPesan berikutnya masuk chat pribadi sampai ada tugas baru.`, "Bot");
+      }
       return reply(chatId, ctx, `✔️ ${label} — tercatat ${new Date().toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" })}.${extra}${done ? "\nTerima kasih, trip selesai. Istirahat yang cukup, Pak." : ""}`, { inline: done ? [] : await tripButtons(fresh) });
     } catch (err) {
       await answer();
@@ -576,17 +580,26 @@ async function handleDocumentPhoto(c: NonNullable<Ctx>, chatId: string, dataUrl:
 // ---------------------------------------------------------
 
 /** Kirim pesan ke sopir lewat bot (pesan kantor, pengingat SIM, tugas baru). */
-export async function sendToDriver(driverId: string, text: string, opts: { sentBy?: string; tripId?: string | null; inline?: InlineButton[][] } = {}) {
+export async function sendToDriver(driverId: string, text: string, opts: { sentBy?: string; tripId?: string | null; inline?: InlineButton[][]; kind?: string } = {}) {
   const links = await prisma.chatChannelLink.findMany({ where: { driverId, active: true, chatId: { not: null } } });
   let sent = false;
   for (const link of links) {
     try {
       await sendMessage(link.chatId!, text, { inline: opts.inline });
-      await log({ chatId: link.chatId!, driverId, tripId: opts.tripId ?? null, direction: "out", kind: "text", text, sentBy: opts.sentBy ?? "Bot", aiJson: opts.inline?.length ? JSON.stringify({ buttons: opts.inline }) : null });
+      await log({ chatId: link.chatId!, driverId, tripId: opts.tripId ?? null, direction: "out", kind: opts.kind ?? "text", text, sentBy: opts.sentBy ?? "Bot", aiJson: opts.inline?.length ? JSON.stringify({ buttons: opts.inline }) : null });
       sent = true;
     } catch (err) {
       console.error("[bot] sendToDriver", err);
     }
   }
   return sent;
+}
+
+/**
+ * Tutup percakapan trip ("reset"): kirim pesan penutup (kind "close") dan hapus status alur bot sopir.
+ * Feed chat kantor & Driver simulator dimulai dari pesan penutup terakhir; riwayat lengkap tetap di catatan trip.
+ */
+export async function closeTripChat(driverId: string, tripId: string | null, text: string, by: string) {
+  await sendToDriver(driverId, text, { sentBy: by, tripId, kind: "close" }).catch(() => false);
+  await prisma.chatChannelLink.updateMany({ where: { driverId }, data: { stateJson: "{}" } });
 }

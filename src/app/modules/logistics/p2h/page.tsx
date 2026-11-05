@@ -4,6 +4,7 @@ import { getLogisticsAccess } from "../server";
 import { addDays, today } from "../lib";
 import { parseP2HRecord } from "../p2hLib";
 import { Card } from "../ui";
+import BulkDelete from "../BulkDelete";
 import { p2hVerdict } from "./P2HRecordView";
 import { submittedBy } from "./data";
 
@@ -69,9 +70,11 @@ export default async function P2HRecordsPage({ searchParams }: { searchParams: P
         <p className="text-xs text-slate-500 mb-3">{checks.length}{checks.length === 200 ? "+" : ""} pemeriksaan · {counts.pass} lolos · {counts.override} perlu override · {counts.fail} gagal kritis</p>
 
         {checks.length === 0 ? <p className="text-sm text-slate-500">Belum ada P2H pada filter ini.</p> : (
-          <div className="overflow-x-auto -mx-5">
+          <>
+          {access.isSuperAdmin && <BulkDelete formId="bulk-p2h" kind="p2h" />}
+          <form id="bulk-p2h" className="overflow-x-auto -mx-5">
             <table className="w-full text-sm">
-              <thead className="text-xs uppercase text-slate-500 bg-slate-50"><tr>{["Waktu", "Truk", "Trip", "Diisi oleh", "Hasil", "Item bermasalah", "Odometer", "Bukti", ""].map(h => <th key={h} className={th}>{h}</th>)}</tr></thead>
+              <thead className="text-xs uppercase text-slate-500 bg-slate-50"><tr>{access.isSuperAdmin && <th className={th}><input type="checkbox" data-select-all aria-label="Pilih semua P2H" /></th>}{["Waktu", "Truk", "Trip", "Diisi oleh", "Hasil", "Item bermasalah", "Odometer", "Bukti", ""].map(h => <th key={h} className={th}>{h}</th>)}</tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {checks.map(c => {
                   const rec = parseP2HRecord(c.resultJson);
@@ -80,6 +83,7 @@ export default async function P2HRecordsPage({ searchParams }: { searchParams: P
                   const notes = Object.values(rec.details).filter(d => d.note).length;
                   return (
                     <tr key={c.id}>
+                      {access.isSuperAdmin && <td className={td}><input type="checkbox" name="ids" value={c.id} aria-label={`Pilih P2H ${c.vehicle.plateNo} ${fmt(c.at)}`} /></td>}
                       <td className={`${td} whitespace-nowrap text-xs`}>{fmt(c.at)}</td>
                       <td className={`${td} whitespace-nowrap`}><Link href={`/modules/logistics/fleet/vehicles/${c.vehicleId}`} className="text-blue-700 hover:underline">{c.vehicle.plateNo}</Link></td>
                       <td className={`${td} whitespace-nowrap`}>{c.trip ? <Link href={`/modules/logistics/trips/${c.trip.id}`} className="text-blue-700 hover:underline">{c.trip.tripNo}</Link> : <span className="text-slate-400">—</span>}</td>
@@ -94,7 +98,8 @@ export default async function P2HRecordsPage({ searchParams }: { searchParams: P
                 })}
               </tbody>
             </table>
-          </div>
+          </form>
+          </>
         )}
       </Card>
     </div>

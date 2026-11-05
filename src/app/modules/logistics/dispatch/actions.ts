@@ -156,35 +156,86 @@ const reasonOf = (r: string) => {
   return reason;
 };
 
+type Actor = { user: { name: string; role: string }; access: { isSuperAdmin: boolean } };
+
+/** Hapus satu trip + jejak audit (dipakai hapus satuan & hapus massal). */
+async function removeTrip({ user, access }: Actor, tripId: string, why: string, notifyDirector: boolean) {
+  const { trip, photos } = await deleteTripRecord(tripId, why, { name: user.name, role: user.role, isSuperAdmin: access.isSuperAdmin });
+  after(async () => {
+    if (notifyDirector) await notifyPermission("logistics_override_director", [`Trip ${trip.tripNo} (${trip.vehicle.plateNo}) DIHAPUS oleh ${user.name} (${user.role}): ${why}`], "/modules/logistics/trips");
+    // Trip yang belum selesai: sopir dikabari supaya tidak (lanjut) jalan; chat trip ditutup.
+    if (!["Completed", "Cancelled"].includes(trip.status) && !trip.isSimulated) {
+      const { closeTripChat } = await import("../bot/driverNotify");
+      await closeTripChat(trip.driverId, null, `❌ Tugas ${trip.tripNo} (${trip.vehicle.plateNo}) DIBATALKAN & dihapus oleh kantor (${user.name}).\nAlasan: ${why}\n${trip.status === "Scheduled" ? "Tidak perlu berangkat." : "Hubungi kantor untuk arahan selanjutnya."}`, user.name).catch(() => {});
+    }
+    for (const url of photos) await deleteFromStorage(url);
+  });
+  return trip.tripNo;
+}
+
+/** Hapus satu catatan P2H + jejak audit. */
+async function removeP2H({ user, access }: Actor, id: string, why: string, notifyDirector: boolean) {
+  const { check, when, result, photos } = await deleteP2HRecord(id, why, { name: user.name, isSuperAdmin: access.isSuperAdmin });
+  after(async () => {
+    if (notifyDirector) await notifyPermission("logistics_override_director", [`Catatan P2H ${check.vehicle.plateNo} ${when} (${result})${check.trip ? ` trip ${check.trip.tripNo}` : ""} DIHAPUS oleh ${user.name}: ${why}`], check.trip ? `/modules/logistics/trips/${check.trip.id}` : "/modules/logistics/p2h");
+    for (const url of photos) await deleteFromStorage(url);
+  });
+  return { check, label: `${check.vehicle.plateNo} ${when}` };
+}
+
 /** Hapus trip (alasan wajib). Jejak: riwayat order + notifikasi Direktur Operasional. */
 export async function deleteTrip(tripId: string, reason: string) {
   return run(async () => {
-    const { user, access } = await guard(a => a.canDispatch);
-    const why = reasonOf(reason);
-    const { trip, photos } = await deleteTripRecord(tripId, why, { name: user.name, role: user.role, isSuperAdmin: access.isSuperAdmin });
-    after(async () => {
-      await notifyPermission("logistics_override_director", [`Trip ${trip.tripNo} (${trip.vehicle.plateNo}) DIHAPUS oleh ${user.name} (${user.role}): ${why}`], "/modules/logistics/trips");
-      // Trip yang belum berangkat: sopir dikabari supaya tidak berangkat.
-      if (trip.status === "Scheduled" && !trip.isSimulated) {
-        const { sendToDriver } = await import("../bot/telegramBot");
-        await sendToDriver(trip.driverId, `❌ Tugas ${trip.tripNo} (${trip.vehicle.plateNo}) DIBATALKAN oleh kantor (${user.name}).\nAlasan: ${why}\nTidak perlu berangkat.`, { sentBy: user.name }).catch(() => {});
-      }
-      for (const url of photos) await deleteFromStorage(url);
-    });
-    return trip.tripNo;
+    const actor = await guard(a => a.canDispatch);
+    return removeTrip(actor, tripId, reasonOf(reason), true);
   });
 }
 
 /** Hapus satu catatan P2H (alasan wajib). Jejak: timeline trip + notifikasi Direktur Operasional. */
 export async function deleteP2H(id: string, reason: string) {
   return run(async () => {
-    const { user, access } = await guard(a => a.canFleet || a.canDispatch);
-    const why = reasonOf(reason);
-    const { check, when, result, photos } = await deleteP2HRecord(id, why, { name: user.name, isSuperAdmin: access.isSuperAdmin });
-    after(async () => {
-      await notifyPermission("logistics_override_director", [`Catatan P2H ${check.vehicle.plateNo} ${when} (${result})${check.trip ? ` trip ${check.trip.tripNo}` : ""} DIHAPUS oleh ${user.name}: ${why}`], check.trip ? `/modules/logistics/trips/${check.trip.id}` : "/modules/logistics/p2h");
-      for (const url of photos) await deleteFromStorage(url);
-    });
+    const actor = await guard(a => a.canFleet || a.canDispatch);
+    const { check } = await removeP2H(actor, id, reasonOf(reason), true);
     return check.trip?.id ?? undefined;
+  });
+}
+
+const MAX_BULK = 100;
+const bulkIds = (ids: unknown) => {
+  const list = Array.isArray(ids) ? [...new Set(ids.filter((x): x is string => typeof x === "string" && x.length < 64))] : [];
+  if (!list.length) throw new Error("Pilih minimal satu baris.");
+  if (list.length > MAX_BULK) throw new Error(`Maksimal ${MAX_BULK} baris sekali hapus.`);
+  return list;
+};
+const summary = (ok: string[], failed: string[]) =>
+  `${ok.length} dihapus${failed.length ? ` · ${failed.length} gagal: ${failed.slice(0, 5).join("; ")}${failed.length > 5 ? " …" : ""}` : ""}`;
+
+/** Super Admin: hapus banyak trip dari daftar Trips. Satu notifikasi ringkasan ke Direktur Operasional. */
+export async function deleteTrips(ids: string[], reason: string) {
+  return run(async () => {
+    const actor = await guard(a => a.isSuperAdmin, "Hapus massal hanya untuk Super Admin.");
+    const why = reasonOf(reason);
+    const ok: string[] = [];
+    const failed: string[] = [];
+    for (const id of bulkIds(ids)) {
+      try { ok.push(await removeTrip(actor, id, why, false)); } catch (err) { failed.push(err instanceof Error ? err.message.slice(0, 80) : id); }
+    }
+    if (ok.length) after(() => notifyPermission("logistics_override_director", [`${ok.length} trip DIHAPUS oleh ${actor.user.name}: ${ok.join(", ")}. Alasan: ${why}`], "/modules/logistics/trips"));
+    return summary(ok, failed);
+  });
+}
+
+/** Super Admin: hapus banyak catatan P2H dari daftar P2H Records. */
+export async function deleteP2Hs(ids: string[], reason: string) {
+  return run(async () => {
+    const actor = await guard(a => a.isSuperAdmin, "Hapus massal hanya untuk Super Admin.");
+    const why = reasonOf(reason);
+    const ok: string[] = [];
+    const failed: string[] = [];
+    for (const id of bulkIds(ids)) {
+      try { ok.push((await removeP2H(actor, id, why, false)).label); } catch (err) { failed.push(err instanceof Error ? err.message.slice(0, 80) : id); }
+    }
+    if (ok.length) after(() => notifyPermission("logistics_override_director", [`${ok.length} catatan P2H DIHAPUS oleh ${actor.user.name}: ${ok.slice(0, 10).join(", ")}${ok.length > 10 ? " …" : ""}. Alasan: ${why}`], "/modules/logistics/p2h"));
+    return summary(ok, failed);
   });
 }
