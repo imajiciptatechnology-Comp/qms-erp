@@ -117,10 +117,15 @@ export default function DriverSimulator({ drivers, vehicles, orders, routes }: {
                 </div>
                 {m.buttons.length > 0 && (
                   <div className="mt-1 space-y-1">
-                    {m.buttons.flat().map(b => (
-                      <button key={b.callback_data ?? b.text} type="button" disabled={busy || m.id !== lastButtons && !b.callback_data?.startsWith("task")}
-                        onClick={() => b.callback_data && send({ type: "button", data: b.callback_data })}
-                        className="w-full rounded-lg bg-white/80 hover:bg-white text-[#3a6d99] text-[13px] font-medium py-1.5 disabled:opacity-40">{b.text}</button>
+                    {/* Satu baris tombol = satu baris di Telegram (checklist P2H tampil 2 kolom). */}
+                    {m.buttons.map((row, ri) => (
+                      <div key={ri} className="flex gap-1">
+                        {row.map(b => (
+                          <button key={b.callback_data ?? b.text} type="button" disabled={busy || m.id !== lastButtons && !b.callback_data?.startsWith("task")}
+                            onClick={() => b.callback_data && send({ type: "button", data: b.callback_data })}
+                            className="flex-1 min-w-0 rounded-lg bg-white/80 hover:bg-white text-[#3a6d99] text-[13px] font-medium py-1.5 px-1 truncate disabled:opacity-40">{b.text}</button>
+                        ))}
+                      </div>
                     ))}
                   </div>
                 )}

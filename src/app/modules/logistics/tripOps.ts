@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { today } from "./lib";
 import { withLock, type Tx } from "./dbUtil";
+import { P2H_ITEMS, p2hNotesText, type P2HDetail, type P2HResult } from "./p2hLib";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, firstUnloadMin, parsePlan } from "./trackingLib";
 import { buildPlan } from "./tracking";
 import { driverConditions, dutyWarnings, evaluateTrip, orderConditions, vehicleConditions, vehicleRuleInclude, type Condition } from "./dispatchRules";
@@ -93,22 +94,14 @@ async function afterTripCompleted(tripId: string) {
 // P2H (pemeriksaan harian)
 // ---------------------------------------------------------
 
-export const P2H_ITEMS = [
-  { key: "rem", label: "Rem", critical: true },
-  { key: "kemudi", label: "Kemudi", critical: true },
-  { key: "ban", label: "Ban", critical: true },
-  { key: "lampu", label: "Lampu utama", critical: true },
-  { key: "apar", label: "APAR", critical: true },
-  { key: "wiper", label: "Wiper", critical: false },
-  { key: "klakson", label: "Klakson", critical: false },
-  { key: "kabin", label: "Kebersihan kabin", critical: false },
-] as const;
+export { P2H_ITEMS, type P2HResult } from "./p2hLib";
 
-export type P2HResult = Record<string, "ok" | "fail" | "unknown">;
-
-/** Simpan hasil P2H (PreTripCheck + timeline). Item kritis gagal → blokir #2 tanpa override; non-kritis → #7 (override Fleet). */
-export async function recordP2H(tripId: string, result: P2HResult, notes: string, by: string, source = "Telegram") {
-  const current = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true, vehicleId: true, driverId: true } });
+/**
+ * Simpan hasil P2H (PreTripCheck + timeline). Item kritis gagal → blokir #2 tanpa override; non-kritis → #7 (override Fleet).
+ * `extra.details` = keterangan/foto per item bermasalah; `extra.odometerKm` = odometer saat P2H (memperbarui km truk).
+ */
+export async function recordP2H(tripId: string, result: P2HResult, notes: string, by: string, source = "Telegram", extra: { details?: Record<string, P2HDetail>; odometerKm?: number | null } = {}) {
+  const current = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, select: { status: true, vehicleId: true, driverId: true, vehicle: { select: { odometerKm: true } } } });
   if (current.status !== "Scheduled") return { status: "late" as const, unknown: [] as string[], fails: [] as string[] };
   const fails = P2H_ITEMS.filter(i => result[i.key] === "fail");
   const critical = fails.filter(i => i.critical);
@@ -117,14 +110,20 @@ export async function recordP2H(tripId: string, result: P2HResult, notes: string
   if (unknown.length) return { status: "incomplete" as const, unknown: unknown.map(i => i.label), fails: [] as string[] };
   const now = new Date().toISOString();
   const passed = critical.length === 0;
+  const details = extra.details ?? {};
+  const odometerKm = extra.odometerKm ?? null;
+  const allNotes = p2hNotesText(details, notes);
   const detail = fails.length ? `gagal: ${fails.map(i => i.label + (i.critical ? " (kritis)" : "")).join(", ")}` : "semua item OK";
+  const odo = odometerKm != null ? ` · odometer ${odometerKm.toLocaleString("id-ID")} km` : "";
   await prisma.$transaction([
     prisma.trip.update({ where: { id: tripId }, data: { p2hDoneAt: passed ? now : null } }),
-    prisma.tripEvent.create({ data: { tripId, status: "P2H", label: passed ? `P2H lolos (${detail})` : `P2H GAGAL — ${detail}. Truk tidak boleh berangkat.`, at: now, note: notes || null, source, by } }),
+    prisma.tripEvent.create({ data: { tripId, status: "P2H", label: (passed ? `P2H lolos (${detail})` : `P2H GAGAL — ${detail}. Truk tidak boleh berangkat.`) + odo, at: now, note: allNotes || null, source, by } }),
     prisma.preTripCheck.create({ data: {
-      vehicleId: current.vehicleId, tripId, driverId: current.driverId, at: now, resultJson: JSON.stringify(result),
-      criticalFails: critical.map(i => i.label).join(", ") || null, otherFails: other.map(i => i.label).join(", ") || null, notes: notes || null, source,
+      vehicleId: current.vehicleId, tripId, driverId: current.driverId, at: now, resultJson: JSON.stringify({ items: result, details, odometerKm }),
+      criticalFails: critical.map(i => i.label).join(", ") || null, otherFails: other.map(i => i.label).join(", ") || null, notes: allNotes || null, source,
     } }),
+    // Odometer hanya naik (salah ketik lebih kecil diabaikan) — dipakai aturan servis overdue (#6/#10).
+    ...(odometerKm != null && odometerKm > current.vehicle.odometerKm ? [prisma.vehicle.update({ where: { id: current.vehicleId }, data: { odometerKm } })] : []),
   ]);
   return { status: passed ? ("passed" as const) : ("failed" as const), unknown: [] as string[], fails: fails.map(i => i.label), critical: critical.map(i => i.label), other: other.map(i => i.label) };
 }

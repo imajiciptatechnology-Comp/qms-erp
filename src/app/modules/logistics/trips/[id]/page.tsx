@@ -7,6 +7,7 @@ import { canOverride, evaluateTrip, LEVEL_LABEL, CONTROL_ACTIONS } from "../../d
 import { TRIP_STATUSES } from "../../trackingLib";
 import { Card, DocLinks, InfoRow } from "../../ui";
 import { OverrideForm, TripActions } from "./TripControls";
+import P2HCard from "./P2HCard";
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "—");
 
@@ -19,7 +20,7 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
   const ev = await evaluateTrip(id);
   const trip = await prisma.trip.findUniqueOrThrow({
     where: { id },
-    include: { vehicle: { include: { truckType: true } }, driver: true, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } }, events: { orderBy: { at: "asc" } }, overrides: { orderBy: { at: "asc" } } },
+    include: { vehicle: { include: { truckType: true } }, driver: true, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } }, events: { orderBy: { at: "asc" } }, overrides: { orderBy: { at: "asc" } }, preTripChecks: { orderBy: { at: "desc" } } },
   });
   const st = TRIP_STATUSES[trip.status];
   const duty = trip.dutyAckJson ? (JSON.parse(trip.dutyAckJson) as { by: string; at: string; warnings: string[] }) : null;
@@ -75,6 +76,8 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
               </ul>
             )}
           </Card>
+
+          {!trip.isSimulated && <P2HCard checks={trip.preTripChecks} driverName={trip.driver.name} />}
 
           <Card title="Timeline">
             <ol className="relative border-l border-slate-200 ml-2 space-y-2.5">

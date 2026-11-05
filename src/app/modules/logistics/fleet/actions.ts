@@ -5,6 +5,7 @@ import { AiError, isAiConfigured } from "@/lib/ai";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { guardAccess as guard, runAction as run } from "../server";
 import { consumeDailyQuota } from "../dbUtil";
+import { P2H_ITEMS } from "../p2hLib";
 import { DRIVER_DOC_TYPES, SERVICE_INTERVAL, VEHICLE_DOC_TYPES, addDays, today } from "../lib";
 import { assertRejectable, ownerFieldsBefore, rememberBeforeVerify, restoreAfterReject, syncDriverFromDocs, syncVehicleFromDocs } from "../fleetDocs";
 import { scanFleetDocument, type FleetScanResult, type ScanDocType } from "../ai/scanFleetDoc";
@@ -201,8 +202,8 @@ export async function recordOfficeP2H(vehicleId: string) {
   return run(async () => {
     const { user } = await guard(a => a.canFleet);
     await prisma.vehicle.findUniqueOrThrow({ where: { id: vehicleId } });
-    const all = { rem: "ok", kemudi: "ok", ban: "ok", lampu: "ok", apar: "ok", wiper: "ok", klakson: "ok", kabin: "ok" };
-    await prisma.preTripCheck.create({ data: { vehicleId, at: new Date().toISOString(), resultJson: JSON.stringify(all), notes: `P2H ulang di pool oleh ${user.name}`, source: "Kantor" } });
+    const all = Object.fromEntries(P2H_ITEMS.map(i => [i.key, "ok"]));
+    await prisma.preTripCheck.create({ data: { vehicleId, at: new Date().toISOString(), resultJson: JSON.stringify({ items: all, details: {}, odometerKm: null }), notes: `P2H ulang di pool oleh ${user.name}`, source: "Kantor" } });
     return vehicleId;
   });
 }
