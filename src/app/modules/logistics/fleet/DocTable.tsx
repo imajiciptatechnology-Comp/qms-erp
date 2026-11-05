@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { FileText, Sparkles } from "lucide-react";
 import { DOC_STATUS_COLORS, daysLeftText, expiryState, rupiah, type DocTypeSpec } from "../lib";
-import { VerifyDocButtons } from "./DocumentForms";
+import { RejectVerifiedButton, VerifyDocButtons } from "./DocumentForms";
 
 type Doc = {
   id: string; docType: string; docNo: string | null; holderName?: string | null; simClass?: string | null; issuer?: string | null;
@@ -52,6 +52,7 @@ export function DocTable({ kind, docs, types, canVerify }: { kind: "vehicle" | "
                 <td className={td}>
                   <span className={`text-xs px-2 py-0.5 rounded-full border whitespace-nowrap ${DOC_STATUS_COLORS[d.status] ?? ""}`}>{isCurrent ? "Berlaku" : d.status}</span>
                   {d.status === "Draft" && canVerify && <div className="mt-2"><VerifyDocButtons kind={kind} id={d.id} validUntil={d.validUntil} needsSimClass={d.docType === "SIM"} simClass={d.simClass} /></div>}
+                  {isCurrent && canVerify && <div className="mt-1.5"><RejectVerifiedButton kind={kind} id={d.id} label={spec?.label ?? d.docType} /></div>}
                 </td>
                 <td className={td}>
                   {d.fileUrl ? <Link href={d.fileUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline whitespace-nowrap"><FileText className="w-3.5 h-3.5" />{d.fileName?.slice(0, 24) ?? "Lihat"}</Link> : <span className="text-xs text-slate-400">—</span>}

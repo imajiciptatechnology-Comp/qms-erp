@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser, getRolesConfig, type CurrentUser } from "@/app/actions/auth";
-import { createNotificationForPermission } from "@/app/actions/notifications";
+import { notifyPermission as createNotificationForPermission } from "@/lib/notificationStore";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { AiError } from "@/lib/ai";
 import { generateQuotationDraft } from "./ai/draftQuotation";

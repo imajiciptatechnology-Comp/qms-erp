@@ -132,7 +132,7 @@ export async function addMeasurement(objectiveId: string, value: number, notes?:
 
   if (status === "Behind" || status === "At Risk") {
     try {
-      const { createNotificationForPermission } = await import("@/app/actions/notifications");
+      const { notifyPermission: createNotificationForPermission } = await import("@/lib/notificationStore");
       const msg = `Quality Objective ${status}: "${obj.title}" (${obj.department}) — current value ${value} ${obj.kpiUnit}, target ${obj.target} ${obj.kpiUnit}`;
       await createNotificationForPermission("objectives", msg, "/modules/objectives");
     } catch {}

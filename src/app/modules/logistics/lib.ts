@@ -228,7 +228,8 @@ export function driverFlags(d: { simExpiry: string }, now = today()): Flag[] {
   return [];
 }
 
-export const TOLL_METHODS: Record<string, string> = { A: "Kartu e-toll perusahaan", B: "Tunai oleh sopir", C: "Kartu pribadi sopir", D: "Ditagihkan ke klien" };
+// "D — ditagihkan ke klien" ditunda dulu (keputusan user 2026-11-05); tol klien pass-through tetap di master klien.
+export const TOLL_METHODS: Record<string, string> = { A: "Kartu e-toll perusahaan", B: "Tunai oleh sopir", C: "Kartu pribadi sopir" };
 
 // ---------------------------------------------------------
 // Dokumen armada & sopir (rancangan 10.1)

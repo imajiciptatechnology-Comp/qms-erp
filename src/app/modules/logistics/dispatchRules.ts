@@ -26,7 +26,7 @@ type VehicleInput = {
   id: string; status: string; odometerKm: number; stnkExpiry: string | null; kirExpiry: string | null; pkbExpiry: string | null; insuranceExpiry: string | null;
   nextServiceDate: string | null; nextServiceKm: number | null;
   services: { kind: string; status: string; system: string | null; items: string }[];
-  preTripChecks: { at: string; criticalFails: string | null; otherFails: string | null }[];
+  preTripChecks: { id?: string; at: string; criticalFails: string | null; otherFails: string | null }[];
 };
 
 /** Kondisi kendaraan (#1, #2, #5, #6, #7, #10). preTripChecks: terbaru dulu. */
@@ -43,7 +43,9 @@ export function vehicleConditions(v: VehicleInput, now = today()): Condition[] {
   // P2H terakhir berlaku sampai ada P2H baru (setelah perbaikan, Fleet Manager mencatat P2H ulang).
   if (p2h) {
     if (p2h.criticalFails) out.push({ key: "2:p2h", code: "2", subject: "vehicle", level: "none", text: `P2H gagal pada item kritis: ${p2h.criticalFails}` });
-    else if (p2h.otherFails) out.push({ key: "7:p2h", code: "7", subject: "vehicle", level: "fleet", text: `P2H gagal pada item non-kritis: ${p2h.otherFails}` });
+    // Kunci memuat id P2H: override berlaku untuk hasil pemeriksaan ITU saja. P2H ulang yang gagal
+    // (item lain atau item sama) adalah kondisi baru dan butuh persetujuan baru.
+    else if (p2h.otherFails) out.push({ key: `7:p2h${p2h.id ? `:${p2h.id}` : ""}`, code: "7", subject: "vehicle", level: "fleet", text: `P2H gagal pada item non-kritis: ${p2h.otherFails}` });
   }
 
   const docs: [string, string | null][] = [["STNK", v.stnkExpiry], ["Pajak kendaraan (PKB)", v.pkbExpiry], ["KIR", v.kirExpiry]];
@@ -149,7 +151,7 @@ export async function dutyWarningsMany(driverIds: string[], plannedHours: number
 export const vehicleRuleInclude = {
   truckType: true,
   services: { where: { status: "Open" }, select: { kind: true, status: true, system: true, items: true } },
-  preTripChecks: { orderBy: { at: "desc" as const }, take: 1, select: { at: true, criticalFails: true, otherFails: true } },
+  preTripChecks: { orderBy: { at: "desc" as const }, take: 1, select: { id: true, at: true, criticalFails: true, otherFails: true } },
 };
 
 /** Evaluasi trip sekarang: kondisi yang masih berlaku + override yang sudah ada (berlaku untuk trip ini saja). */

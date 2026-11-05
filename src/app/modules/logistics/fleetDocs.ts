@@ -2,7 +2,8 @@
 // Sengaja bukan "use server": dipanggil dari server actions, halaman, dan webhook bot.
 import { prisma } from "@/lib/prisma";
 import { getJson, setJson } from "@/lib/kvStore";
-import { claimInterval, withLock } from "./dbUtil";
+import { claimInterval } from "./dbUtil";
+import { notifyPermission as notifyUsers } from "@/lib/notificationStore";
 import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES, addDays, expiryState, qualifiesFor, today } from "./lib";
 
 /** Dokumen Verified dengan masa berlaku paling akhir per jenis. */
@@ -72,6 +73,64 @@ export async function syncAutoQualifications(d: { id: string; simClass: string; 
     if (ok && !q) await prisma.driverQualification.create({ data: { driverId: d.id, truckTypeId: t.id, basis: "auto" } });
     if (!ok && q?.basis === "auto") await prisma.driverQualification.delete({ where: { id: q.id } });
   }
+}
+
+// ---------------------------------------------------------
+// Tolak dokumen Verified → kembalikan masa berlaku sebelumnya
+// ---------------------------------------------------------
+
+const DRIVER_DOC_FIELDS: Record<string, ("simExpiry" | "simClass" | "simNo" | "defensiveTraining" | "trailerCertified")[]> = {
+  SIM: ["simExpiry", "simClass", "simNo"], TRAINING_DEFENSIVE: ["defensiveTraining"], TRAINING_TRAILER: ["trailerCertified"],
+};
+const fieldsOf = (kind: "vehicle" | "driver", docType: string): string[] =>
+  kind === "vehicle" ? (VEHICLE_DOC_TYPES[docType] ? [VEHICLE_DOC_TYPES[docType].field] : []) : DRIVER_DOC_FIELDS[docType] ?? [];
+const prevKey = (docId: string) => `logistics_doc_prev:${docId}`;
+
+/** Ambil nilai kolom Vehicle/Driver yang akan ditimpa oleh dokumen jenis ini (dipanggil SEBELUM verifikasi). */
+export async function ownerFieldsBefore(kind: "vehicle" | "driver", ownerId: string, docType: string): Promise<Record<string, unknown>> {
+  const fields = fieldsOf(kind, docType);
+  if (!fields.length) return {};
+  const select = Object.fromEntries(fields.map(f => [f, true]));
+  const row = kind === "vehicle"
+    ? await prisma.vehicle.findUnique({ where: { id: ownerId }, select })
+    : await prisma.driver.findUnique({ where: { id: ownerId }, select });
+  return (row ?? {}) as Record<string, unknown>;
+}
+
+/** Simpan nilai sebelum verifikasi untuk dokumen ini (hanya sekali — verifikasi ulang tidak menimpa nilai asal). */
+export async function rememberBeforeVerify(docId: string, before: Record<string, unknown>) {
+  if (!Object.keys(before).length) return;
+  if ((await getJson<Record<string, unknown> | null>(prevKey(docId), null)) != null) return;
+  await setJson(prevKey(docId), before);
+}
+
+/** Sebelum menolak dokumen Verified: pastikan ada nilai pengganti (dokumen Verified lain atau nilai sebelum verifikasi). */
+export async function assertRejectable(kind: "vehicle" | "driver", doc: { id: string; docType: string; ownerId: string; status: string }) {
+  if (doc.status !== "Verified") return;
+  const otherVerified = kind === "vehicle"
+    ? await prisma.vehicleDocument.count({ where: { vehicleId: doc.ownerId, docType: doc.docType, status: "Verified", validUntil: { not: null }, id: { not: doc.id } } })
+    : await prisma.driverDocument.count({ where: { driverId: doc.ownerId, docType: doc.docType, status: "Verified", validUntil: { not: null }, id: { not: doc.id } } });
+  if (otherVerified) return;
+  if ((await getJson<Record<string, unknown> | null>(prevKey(doc.id), null)) != null) return;
+  throw new Error("Masa berlaku sebelum dokumen ini tidak tercatat (dokumen lama/data demo). Tambahkan dokumen pengganti yang benar dulu, lalu tolak dokumen ini.");
+}
+
+/**
+ * Sesudah dokumen ditolak: bila masih ada dokumen Verified lain sejenis, sync sudah memakai yang terbaru.
+ * Bila tidak ada, kolom dikembalikan ke nilai sebelum dokumen ini diverifikasi. Mengembalikan true bila dipulihkan.
+ */
+export async function restoreAfterReject(kind: "vehicle" | "driver", doc: { id: string; docType: string; ownerId: string }) {
+  const before = await getJson<Record<string, unknown> | null>(prevKey(doc.id), null);
+  if (!before) return false;
+  const otherVerified = kind === "vehicle"
+    ? await prisma.vehicleDocument.count({ where: { vehicleId: doc.ownerId, docType: doc.docType, status: "Verified", validUntil: { not: null }, id: { not: doc.id } } })
+    : await prisma.driverDocument.count({ where: { driverId: doc.ownerId, docType: doc.docType, status: "Verified", validUntil: { not: null }, id: { not: doc.id } } });
+  if (otherVerified) return false;
+  const data = Object.fromEntries(fieldsOf(kind, doc.docType).filter(f => f in before).map(f => [f, before[f]]));
+  if (!Object.keys(data).length) return false;
+  if (kind === "vehicle") await prisma.vehicle.update({ where: { id: doc.ownerId }, data });
+  else await syncAutoQualifications(await prisma.driver.update({ where: { id: doc.ownerId }, data }));
+  return true;
 }
 
 export type ExpiringItem = {
@@ -145,31 +204,9 @@ export async function runFleetReminders(onDriverReminder?: (item: ExpiringItem, 
   return fresh.length;
 }
 
-/**
- * Tulis notifikasi ERP (KvStore "notifications") untuk semua user yang punya izin `permission` (+ Super Admin).
- * Sekali baca–tulis, tanpa revalidatePath, jadi aman dipanggil dari after()/webhook.
- */
+/** Notifikasi ERP untuk semua user dengan izin `permission` (+ Super Admin). Aman dari after()/webhook (tanpa revalidatePath). */
 export async function notifyPermission(permission: string, messages: string[], link?: string) {
-  const [users, roles] = await Promise.all([
-    prisma.user.findMany({ select: { id: true, role: true } }),
-    getJson<{ name: string; permissions: string[] }[]>("roles", []),
-  ]);
-  const targets = users.filter(u => u.role === "Super Admin" || roles.find(r => r.name === u.role)?.permissions?.some(p => p === permission || p === "all"));
-  if (!targets.length || !messages.length) return;
-  const at = new Date().toISOString();
-  // Baca–ubah–tulis daftar notifikasi di bawah satu kunci: notifikasi dari webhook bot & aksi kantor
-  // yang datang bersamaan tidak saling menimpa.
-  await withLock("kv:notifications", async tx => {
-    const row = await tx.kvStore.findUnique({ where: { key: "notifications" } });
-    let list: { id: string; userId?: string; message: string; isRead: boolean; createdAt: string; link?: string }[] = [];
-    try { list = row ? JSON.parse(row.value) : []; } catch { list = []; }
-    let n = 0;
-    for (const message of messages) for (const u of targets) {
-      list.unshift({ id: `${Date.now()}-${n++}`, userId: u.id, message: message.slice(0, 500), isRead: false, createdAt: at, link });
-    }
-    const value = JSON.stringify(list.slice(0, 500));
-    await tx.kvStore.upsert({ where: { key: "notifications" }, update: { value }, create: { key: "notifications", value } });
-  });
+  await notifyUsers(permission, messages, link);
 }
 
 /** Dipanggil lewat after() saat halaman logistik dibuka: paling sering sekali per jam. */

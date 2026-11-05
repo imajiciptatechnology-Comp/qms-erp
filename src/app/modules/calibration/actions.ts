@@ -281,7 +281,7 @@ export async function exportCalibrationExcel() {
 export async function sendCalibrationReminders() {
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const equipments = await prisma.equipment.findMany();
-  const { createNotificationForPermission } = await import("@/app/actions/notifications");
+  const { notifyPermission: createNotificationForPermission } = await import("@/lib/notificationStore");
 
   for (const e of equipments) {
     const diffDays = Math.ceil((new Date(e.nextCalDate).getTime() - today.getTime()) / (1000 * 60 * 60 * 24));

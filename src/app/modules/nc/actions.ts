@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { getCurrentUser } from "@/app/actions/auth";
-import { createNotificationForUser } from "@/app/actions/notifications";
+import { notifyUser as createNotificationForUser } from "@/lib/notificationStore";
 
 
 export type RCA = {

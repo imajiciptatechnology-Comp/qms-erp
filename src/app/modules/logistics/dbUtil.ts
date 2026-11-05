@@ -2,21 +2,13 @@
 // Bukan "use server" — hanya dipanggil dari kode server.
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { withAdvisoryLock } from "@/lib/dbLock";
 import { today } from "./lib";
 
 export type Tx = Prisma.TransactionClient;
 
-/**
- * Jalankan `fn` di dalam transaksi yang memegang advisory lock Postgres `key`.
- * Dipakai untuk penomoran (Surat Jalan, order) dan transisi yang tidak boleh balapan.
- * Semua query di `fn` harus memakai `tx`, bukan `prisma`, supaya tidak menunggu koneksi lain.
- */
-export async function withLock<T>(key: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT 1 AS ok FROM (SELECT pg_advisory_xact_lock(hashtext(${key}))) AS l`;
-    return fn(tx);
-  }, { timeout: 15_000, maxWait: 10_000 });
-}
+/** Lihat src/lib/dbLock.ts. Semua query di `fn` harus memakai `tx`, bukan `prisma`. */
+export const withLock = withAdvisoryLock;
 
 /** Seperti withLock, tapi tidak menunggu: null bila kunci sedang dipegang request lain. */
 export async function tryWithLock<T>(key: string, fn: (tx: Tx) => Promise<T>): Promise<T | null> {

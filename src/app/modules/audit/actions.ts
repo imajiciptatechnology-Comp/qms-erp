@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/app/actions/auth";
-import { createNotificationForUser, createNotificationForPermission } from "@/app/actions/notifications";
+import { notifyUser as createNotificationForUser, notifyPermission as createNotificationForPermission } from "@/lib/notificationStore";
 import { addNCR } from "@/app/modules/nc/actions";
 
 export type ChecklistItem = {

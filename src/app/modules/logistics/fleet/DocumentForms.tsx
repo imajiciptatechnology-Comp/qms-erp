@@ -385,6 +385,19 @@ export function AddServiceForm({ vehicleId, odometerKm, plateNo }: { vehicleId: 
 // Verifikasi draft
 // ---------------------------------------------------------
 
+/** Tolak dokumen yang sedang berlaku (mis. salah input/salah scan). Masa berlaku kembali ke versi sebelumnya. */
+export function RejectVerifiedButton({ kind, id, label }: { kind: "vehicle" | "driver"; id: string; label: string }) {
+  const { pending, error, exec } = useAction();
+  return (
+    <div className="space-y-1">
+      <button type="button" disabled={pending}
+        onClick={() => { if (window.confirm(`Tolak ${label} ini? Masa berlaku kembali ke dokumen/nilai sebelumnya.`)) exec(() => setDocumentStatus(kind, id, "Rejected")); }}
+        className="text-xs font-medium text-slate-500 hover:text-red-700 hover:underline disabled:opacity-60">Reject</button>
+      <ErrorNote error={error} />
+    </div>
+  );
+}
+
 export function VerifyDocButtons({ kind, id, validUntil, needsSimClass, simClass }: { kind: "vehicle" | "driver"; id: string; validUntil: string | null; needsSimClass?: boolean; simClass?: string | null }) {
   const [date, setDate] = useState(validUntil ?? "");
   const [cls, setCls] = useState(simClass ?? "");

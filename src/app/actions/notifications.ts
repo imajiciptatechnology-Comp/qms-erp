@@ -1,113 +1,43 @@
 "use server";
 
+// Server action notifikasi untuk Topbar: hanya baca/ubah notifikasi milik user yang login.
+// Membuat notifikasi dilakukan dari kode server lewat "@/lib/notificationStore" (bukan server action),
+// supaya browser tidak bisa menyuntik atau menimpa notifikasi user lain.
 import { revalidatePath } from "next/cache";
-import { getCurrentUser, getAllUsers, getRolesConfig } from "./auth";
-import { getJson, setJson } from "@/lib/kvStore";
+import { getCurrentUser } from "./auth";
+import { listNotifications, updateNotifications, type Notification } from "@/lib/notificationStore";
 
-export type Notification = {
-  id: string;
-  userId?: string;     // If targeted to a specific user
-  targetRole?: string; // If targeted to anyone with a specific role/permission
-  message: string;
-  isRead: boolean;
-  createdAt: string;
-  link?: string;
-};
+export type { Notification } from "@/lib/notificationStore";
 
-export async function getNotifications() {
-  return getJson<Notification[]>("notifications", []);
-}
+type Me = { id: string; role: string };
 
-export async function saveNotifications(notifs: Notification[]) {
-  await setJson("notifications", notifs);
-}
-
-export async function createNotification(data: Omit<Notification, "id" | "isRead" | "createdAt">) {
-  const notifs = await getNotifications();
-  const newNotif: Notification = {
-    ...data,
-    id: Date.now().toString(),
-    isRead: false,
-    createdAt: new Date().toISOString(),
-  };
-  notifs.unshift(newNotif); // Add to beginning
-  saveNotifications(notifs);
-  revalidatePath("/");
-}
-
-/**
- * Create a notification targeted to a specific user by ID.
- */
-export async function createNotificationForUser(userId: string, message: string, link?: string) {
-  await createNotification({ userId, message, link });
-}
-
-/**
- * Create notifications for all users who have a specific permission.
- * This is more targeted than broadcasting to "All".
- */
-export async function createNotificationForPermission(permission: string, message: string, link?: string) {
-  const allUsers = await getAllUsers();
-  const rolesConfig = await getRolesConfig();
-
-  for (const u of allUsers) {
-    // Super Admin always gets everything
-    if (u.role === "Super Admin") {
-      await createNotification({ userId: u.id, message, link });
-      continue;
-    }
-    // Check if the user's role has the required permission
-    const roleData = rolesConfig.find((r: any) => r.name === u.role);
-    if (roleData?.permissions?.includes(permission)) {
-      await createNotification({ userId: u.id, message, link });
-    }
-  }
-}
-
-export async function markNotificationAsRead(id: string) {
-  const notifs = await getNotifications();
-  const index = notifs.findIndex(n => n.id === id);
-  if (index !== -1) {
-    notifs[index].isRead = true;
-    saveNotifications(notifs);
-    revalidatePath("/");
-  }
-}
+/** Notifikasi yang boleh dilihat/diubah user ini (Super Admin juga notifikasi lama tanpa userId). */
+const isMine = (n: Notification, me: Me) => (n.userId ? n.userId === me.id : me.role === "Super Admin");
 
 export async function getMyNotifications() {
   const user = await getCurrentUser();
   if (!user) return [];
-  
-  const notifs = await getNotifications();
-  
-  return notifs.filter(n => {
-    // Direct user-targeted notification
-    if (n.userId && n.userId === user.id) return true;
-    // Super Admin sees ALL notifications (legacy & new)
-    if (user.role === "Super Admin" && !n.userId) return true;
-    return false;
-  }).slice(0, 20); // return top 20
+  const notifs = await listNotifications();
+  return notifs.filter(n => isMine(n, user)).slice(0, 20);
+}
+
+export async function markNotificationAsRead(id: string) {
+  const user = await getCurrentUser();
+  if (!user || typeof id !== "string") return;
+  await updateNotifications(list => list.map(n => (n.id === id && isMine(n, user) ? { ...n, isRead: true } : n)));
+  revalidatePath("/");
 }
 
 export async function deleteNotification(id: string) {
-  const notifs = await getNotifications();
-  const updated = notifs.filter(n => n.id !== id);
-  saveNotifications(updated);
+  const user = await getCurrentUser();
+  if (!user || typeof id !== "string") return;
+  await updateNotifications(list => list.filter(n => !(n.id === id && isMine(n, user))));
   revalidatePath("/");
 }
 
 export async function clearAllNotifications() {
   const user = await getCurrentUser();
   if (!user) return;
-  
-  const notifs = await getNotifications();
-  // Only remove notifications that belong to this user
-  const updated = notifs.filter(n => {
-    if (n.userId === user.id) return false; // Remove mine
-    if (user.role === "Super Admin" && !n.userId) return false; // Super Admin clears legacy ones too
-    return true; // Keep everything else
-  });
-  
-  saveNotifications(updated);
+  await updateNotifications(list => list.filter(n => !isMine(n, user)));
   revalidatePath("/");
 }

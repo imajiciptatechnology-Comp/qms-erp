@@ -219,6 +219,21 @@ export async function createTrip(input: TripInput, by: string, opts: { mode: "di
     if (order) await prisma.charterOrder.update({ where: { id: order.id }, data: { status: "Confirmed", historyJson: order.historyJson } }).catch(() => {});
     throw err;
   });
+  // Batas: satu truk / sopir / kenek hanya boleh punya SATU trip aktif. Cek "sibuk" di atas dilakukan sebelum
+  // menulis, jadi dua dispatcher yang meng-assign unit yang sama bersamaan bisa sama-sama lolos. Cek ulang
+  // sesudah trip dibuat: trip yang lebih dulu tercipta menang, trip ini dibatalkan dan order dikembalikan.
+  const units = [{ vehicleId: vehicle.id }, { driverId: driver.id }, ...(helperId ? [{ helperId }] : [])];
+  const rivals = await prisma.trip.findMany({
+    where: { id: { not: trip.id }, isSimulated: false, status: { in: ACTIVE_TRIP_STATUSES }, OR: units },
+    select: { id: true, tripNo: true, createdAt: true, vehicleId: true, driverId: true, helperId: true },
+  });
+  const winner = rivals.find(r => r.createdAt < trip.createdAt || (r.createdAt === trip.createdAt && r.id < trip.id));
+  if (winner) {
+    await prisma.trip.delete({ where: { id: trip.id } }).catch(() => {});
+    if (order) await prisma.charterOrder.updateMany({ where: { id: order.id, status: "Scheduled" }, data: { status: "Confirmed", historyJson: order.historyJson } }).catch(() => {});
+    const what = winner.vehicleId === vehicle.id ? `Truk ${vehicle.plateNo}` : winner.driverId === driver.id ? `Sopir ${driver.name}` : "Kenek ini";
+    throw new Error(`${what} baru saja di-assign ke ${winner.tripNo} oleh dispatcher lain. Pilih unit lain.`);
+  }
   await prisma.tripEvent.create({ data: { tripId: trip.id, status: "Scheduled", label: `Truk ${vehicle.plateNo} + ${driver.name} di-assign oleh ${by}${warnings.length ? ` (peringatan jam kerja dibaca: ${warnings.length})` : ""}`, at: now, source: "Kantor", by } });
   if (opts.mode === "demo") await issueSuratJalan(trip.id, by);
   return { trip, vehicle, driver, route, order, stopNames, conditions, warnings };

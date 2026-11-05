@@ -6,7 +6,7 @@ import { uploadToStorage } from "@/lib/uploadFile";
 import { guardAccess as guard, runAction as run } from "../server";
 import { consumeDailyQuota } from "../dbUtil";
 import { DRIVER_DOC_TYPES, SERVICE_INTERVAL, VEHICLE_DOC_TYPES, addDays, today } from "../lib";
-import { syncDriverFromDocs, syncVehicleFromDocs } from "../fleetDocs";
+import { assertRejectable, ownerFieldsBefore, rememberBeforeVerify, restoreAfterReject, syncDriverFromDocs, syncVehicleFromDocs } from "../fleetDocs";
 import { scanFleetDocument, type FleetScanResult, type ScanDocType } from "../ai/scanFleetDoc";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -71,12 +71,14 @@ export async function saveVehicleDocument(fd: FormData) {
     if (validFrom && validUntil && validFrom > validUntil) throw new Error("Tanggal berlaku dari harus sebelum berlaku s/d.");
     const file = await storeFile(fd, `logistics/vehicles/${vehicleId}`);
     const now = new Date().toISOString();
+    const before = status === "Verified" ? await ownerFieldsBefore("vehicle", vehicleId, docType) : {};
     const doc = await prisma.vehicleDocument.create({ data: {
       vehicleId, docType, docNo: s(fd, "docNo"), holderName: s(fd, "holderName"), validFrom, validUntil,
       amount: n(fd, "amount"), paidDate: d(fd, "paidDate", "Tanggal bayar"), ...file, aiJson: s(fd, "aiJson"),
       source: s(fd, "source") === "Scan AI" ? "Scan AI" : "Manual", status, notes: s(fd, "notes"),
       createdBy: user.name, createdAt: now, ...(status === "Verified" ? { verifiedBy: user.name, verifiedAt: now } : {}),
     } });
+    if (status === "Verified") await rememberBeforeVerify(doc.id, before);
     await syncVehicleFromDocs(vehicle.id);
     return doc.id;
   });
@@ -101,12 +103,14 @@ export async function saveDriverDocument(fd: FormData) {
     if (docType === "SIM" && status === "Verified" && !["B1 Umum", "B2 Umum"].includes(simClass ?? "")) throw new Error("Pilih golongan SIM (B1 Umum / B2 Umum).");
     const file = await storeFile(fd, `logistics/drivers/${driverId}`);
     const now = new Date().toISOString();
+    const before = status === "Verified" ? await ownerFieldsBefore("driver", driverId, docType) : {};
     const doc = await prisma.driverDocument.create({ data: {
       driverId, docType, docNo: s(fd, "docNo"), simClass, holderName: s(fd, "holderName"), issuer: s(fd, "issuer"),
       validFrom: d(fd, "validFrom", "Berlaku dari"), validUntil, ...file, aiJson: s(fd, "aiJson"),
       source: s(fd, "source") === "Scan AI" ? "Scan AI" : "Manual", status, notes: s(fd, "notes"),
       createdBy: user.name, createdAt: now, ...(status === "Verified" ? { verifiedBy: user.name, verifiedAt: now } : {}),
     } });
+    if (status === "Verified") await rememberBeforeVerify(doc.id, before);
     await syncDriverFromDocs(driverId);
     return doc.id;
   });
@@ -125,16 +129,23 @@ export async function setDocumentStatus(kind: "vehicle" | "driver", id: string, 
       const doc = await prisma.vehicleDocument.findUniqueOrThrow({ where: { id } });
       const validUntil = fields?.validUntil || doc.validUntil;
       if (status === "Verified" && !validUntil) throw new Error("Isi tanggal berlaku s/d sebelum memverifikasi.");
+      if (status === "Rejected") await assertRejectable("vehicle", { id, docType: doc.docType, ownerId: doc.vehicleId, status: doc.status });
+      if (status === "Verified" && doc.status !== "Verified") await rememberBeforeVerify(id, await ownerFieldsBefore("vehicle", doc.vehicleId, doc.docType));
       await prisma.vehicleDocument.update({ where: { id }, data: { status, validUntil, verifiedBy: user.name, verifiedAt: now } });
       await syncVehicleFromDocs(doc.vehicleId);
+      // Ditolak & tidak ada dokumen Verified lain sejenis → masa berlaku kembali ke nilai sebelum dokumen ini.
+      if (status === "Rejected") await restoreAfterReject("vehicle", { id, docType: doc.docType, ownerId: doc.vehicleId });
     } else {
       const doc = await prisma.driverDocument.findUniqueOrThrow({ where: { id } });
       const validUntil = fields?.validUntil || doc.validUntil;
       const simClass = fields?.simClass || doc.simClass;
       if (status === "Verified" && !validUntil) throw new Error("Isi tanggal berlaku s/d sebelum memverifikasi.");
       if (status === "Verified" && doc.docType === "SIM" && !["B1 Umum", "B2 Umum"].includes(simClass ?? "")) throw new Error("Pilih golongan SIM sebelum memverifikasi.");
+      if (status === "Rejected") await assertRejectable("driver", { id, docType: doc.docType, ownerId: doc.driverId, status: doc.status });
+      if (status === "Verified" && doc.status !== "Verified") await rememberBeforeVerify(id, await ownerFieldsBefore("driver", doc.driverId, doc.docType));
       await prisma.driverDocument.update({ where: { id }, data: { status, validUntil, simClass, verifiedBy: user.name, verifiedAt: now } });
       await syncDriverFromDocs(doc.driverId);
+      if (status === "Rejected") await restoreAfterReject("driver", { id, docType: doc.docType, ownerId: doc.driverId });
     }
   });
 }

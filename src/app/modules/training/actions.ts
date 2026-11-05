@@ -157,7 +157,7 @@ export async function addTraining(formData: FormData) {
 
     // Notify users
     try {
-      const { createNotificationForPermission } = await import("@/app/actions/notifications");
+      const { notifyPermission: createNotificationForPermission } = await import("@/lib/notificationStore");
       await createNotificationForPermission(
         "training",
         `New training scheduled: ${trainingNo} — "${formData.get("title")}" (${formData.get("department")}, ${formData.get("plannedDate")})`,
