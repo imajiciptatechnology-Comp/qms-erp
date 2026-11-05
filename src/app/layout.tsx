@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppLayout from "@/components/layout/AppLayout";
-import { getCurrentUser, getRolesConfig } from "./actions/auth";
+import { getCurrentUser } from "./actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { prisma } from "@/lib/prisma";
 
 const geistSans = Geist({

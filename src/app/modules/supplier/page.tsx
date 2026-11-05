@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { getSuppliers } from "./actions";
 import { getNCRs } from "@/app/modules/nc/actions";
 import SupplierView from "./SupplierView";

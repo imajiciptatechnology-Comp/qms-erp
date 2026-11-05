@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { getContext } from "./actions";
 import ContextView from "./ContextView";
 

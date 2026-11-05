@@ -3,23 +3,15 @@
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getJson, setJson } from "@/lib/kvStore";
+import { setJson } from "@/lib/kvStore";
 import { uploadToStorage } from "@/lib/uploadFile";
+import { getJwtSecretKey, getRolesConfig, readCurrentUser, type CurrentUser } from "@/lib/authServer";
 import * as jose from 'jose';
 import bcrypt from 'bcryptjs';
 
-// JWT_SECRET wajib diisi lewat environment variable.
-// Tidak ada lagi nilai default: secret default yang tertulis di repo
-// memungkinkan siapa pun memalsukan token login.
-function getJwtSecretKey(): Uint8Array {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error(
-      "JWT_SECRET belum di-set. Tambahkan JWT_SECRET ke environment."
-    );
-  }
-  return new TextEncoder().encode(secret);
-}
+// File ini "use server": SETIAP export bisa dipanggil langsung dari browser.
+// Helper baca data (getRolesConfig, getAllUsers) ada di "@/lib/authServer" dan tidak diekspor dari sini.
+export type { CurrentUser } from "@/lib/authServer";
 
 export async function login(formData: FormData) {
   const email = formData.get("email") as string;
@@ -39,13 +31,9 @@ export async function login(formData: FormData) {
     .sign(getJwtSecretKey());
 
   const cookieStore = await cookies();
-  cookieStore.set("auth_token", token, { httpOnly: true, path: "/" });
+  cookieStore.set("auth_token", token, { httpOnly: true, path: "/", sameSite: "lax", secure: process.env.NODE_ENV === "production", maxAge: 24 * 60 * 60 });
 
   return { success: true };
-}
-
-export async function getRolesConfig() {
-  return getJson<any[]>("roles", []);
 }
 
 async function saveRolesConfig(roles: any[]) {
@@ -57,39 +45,9 @@ export async function logout() {
   cookieStore.delete("auth_token");
 }
 
-export type CurrentUser = {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  department: string;
-};
-
+/** Identitas user yang sedang login (hanya data miliknya sendiri — aman sebagai server action). */
 export async function getCurrentUser(): Promise<CurrentUser | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('auth_token')?.value;
-
-  if (!token) return null;
-
-  try {
-    const { payload } = await jose.jwtVerify(token, getJwtSecretKey());
-    return {
-      id: payload.id as string,
-      name: payload.name as string,
-      email: payload.email as string,
-      role: payload.role as string,
-      department: payload.department as string,
-    };
-  } catch (err) {
-    return null;
-  }
-}
-
-export async function getAllUsers() {
-  const users = await prisma.user.findMany({
-    select: { id: true, name: true, email: true, role: true, department: true, photoUrl: true, phone: true, bio: true }
-  });
-  return users;
+  return readCurrentUser();
 }
 
 export async function updateProfile(formData: FormData) {
@@ -106,7 +64,11 @@ export async function updateProfile(formData: FormData) {
   if (clearPhoto) {
     photoUrl = null;
   } else if (photoFile && photoFile.size > 0) {
-    const ext = photoFile.name.includes(".") ? "." + photoFile.name.split(".").pop() : "";
+    // Ekstensi dari tipe yang divalidasi, bukan dari nama file kiriman browser (mencegah path aneh di bucket).
+    const PHOTO_EXT: Record<string, string> = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif" };
+    const ext = PHOTO_EXT[photoFile.type];
+    if (!ext) return { success: false, message: "Foto harus JPG, PNG, WebP, atau GIF." };
+    if (photoFile.size > 4 * 1024 * 1024) return { success: false, message: "Foto maksimal 4 MB." };
     const fileName = `profile_${userId}_${Date.now()}${ext}`;
     photoUrl = await uploadToStorage("profiles", photoFile, fileName);
   }
@@ -137,6 +99,9 @@ export async function changeUserRole(targetUserId: string, newRole: string) {
   if (currentUser?.role !== "Super Admin") {
     return { success: false, message: "Hanya Super Admin yang bisa ubah role!" };
   }
+  if (typeof targetUserId !== "string" || typeof newRole !== "string" || !newRole.trim() || newRole.length > 60) {
+    return { success: false, message: "Role tidak valid." };
+  }
 
   await prisma.user.update({
     where: { id: targetUserId },
@@ -155,6 +120,9 @@ export async function updateRolePermissions(roleName: string, moduleIds: string[
 
   if (roleName === "Super Admin") {
     return { success: false, message: "Permissions Super Admin tidak bisa diubah." };
+  }
+  if (typeof roleName !== "string" || !roleName.trim() || !Array.isArray(moduleIds) || moduleIds.some(m => typeof m !== "string" || m.length > 80)) {
+    return { success: false, message: "Data permission tidak valid." };
   }
 
   const roles = await getRolesConfig();

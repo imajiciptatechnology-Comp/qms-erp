@@ -1,4 +1,5 @@
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { salesAccess } from "../../../lib";
 import { DOC_KINDS, buildDocument, type DocKind } from "../../builders";
 import { renderPdf } from "../../pdf";

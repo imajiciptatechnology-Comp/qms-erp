@@ -1,7 +1,8 @@
 import { getAuditById } from "../actions";
 import { getNCRs } from "@/app/modules/nc/actions";
 import AuditDetailClient from "./AuditDetailClient";
-import { getCurrentUser, getRolesConfig, getAllUsers } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig, getAllUsers } from "@/lib/authServer";
 import { redirect } from "next/navigation";
 
 export default async function AuditDetailPage({ params }: { params: Promise<{ id: string }> }) {

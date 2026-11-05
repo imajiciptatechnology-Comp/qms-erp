@@ -1,4 +1,5 @@
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { getShipments } from "./actions";
 import { getWorkOrders } from "@/app/modules/ppc/actions";
 import ShippingView from "./ShippingView";

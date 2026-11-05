@@ -1,6 +1,7 @@
 import { getDocuments, checkAndNotifyDocumentReviews } from "./actions";
 import DocumentControlView from "./DocumentControlView";
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { redirect } from "next/navigation";
 
 export default async function DocumentControlPage() {

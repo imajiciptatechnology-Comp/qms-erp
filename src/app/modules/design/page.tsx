@@ -1,4 +1,5 @@
-import { getCurrentUser, getRolesConfig, getAllUsers } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig, getAllUsers } from "@/lib/authServer";
 import { getDesignProjects } from "./actions";
 import DesignView from "./DesignView";
 

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { getRisks } from "./actions";
 import { getJson, setJson } from "@/lib/kvStore";
 import { getNCRs } from "@/app/modules/nc/actions";

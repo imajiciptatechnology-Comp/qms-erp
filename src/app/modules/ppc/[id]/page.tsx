@@ -1,5 +1,6 @@
 import { getWorkOrder } from "../actions";
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { notFound } from "next/navigation";
 import PpcDetailClient from "./PpcDetailClient";
 

@@ -1,6 +1,7 @@
 import { getNCRs } from "../actions";
 import { getTrainings } from "@/app/modules/training/actions";
-import { getCurrentUser, getRolesConfig, getAllUsers } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig, getAllUsers } from "@/lib/authServer";
 import { redirect } from "next/navigation";
 import NcDetailClient from "./NcDetailClient";
 

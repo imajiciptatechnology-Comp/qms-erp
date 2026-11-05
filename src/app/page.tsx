@@ -11,7 +11,8 @@ import AiInsightsPanel from "@/components/AiInsightsPanel";
 import { getCachedInsights } from "./actions/ai-insights";
 import { isAiConfigured } from "@/lib/ai";
 import { redirect } from "next/navigation";
-import { getCurrentUser, getRolesConfig } from "./actions/auth";
+import { getCurrentUser } from "./actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { logisticsAccess } from "./modules/logistics/lib";
 
 // Server Action "Generate Analysis" memanggil AI dan bisa butuh puluhan detik.

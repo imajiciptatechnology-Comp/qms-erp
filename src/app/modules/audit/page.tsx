@@ -1,6 +1,7 @@
 import { getAudits } from "./actions";
 import AuditView from "./AuditView";
-import { getCurrentUser, getRolesConfig, getAllUsers } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig, getAllUsers } from "@/lib/authServer";
 import { redirect } from "next/navigation";
 
 export default async function AuditPage() {

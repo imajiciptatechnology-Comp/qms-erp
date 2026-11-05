@@ -4,7 +4,8 @@ import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { withLock, type Tx } from "./dbUtil";
-import { getCurrentUser, getRolesConfig, type CurrentUser } from "@/app/actions/auth";
+import { getCurrentUser, type CurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import type { DocBrand } from "@/app/modules/sales/documents/model";
 import { computeCharterPrice, logisticsAccess, today, type LogisticsAccess, type PriceInput, type RateTable } from "./lib";
 

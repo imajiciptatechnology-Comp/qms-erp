@@ -1,4 +1,5 @@
-import { getAllUsers, getCurrentUser, getRolesConfig } from "../../actions/auth";
+import { getCurrentUser } from "../../actions/auth";
+import { getAllUsers, getRolesConfig } from "@/lib/authServer";
 import RolesClient from "./RolesClient";
 import { redirect } from "next/navigation";
 

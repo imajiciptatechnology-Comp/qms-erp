@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getCurrentUser, getRolesConfig, type CurrentUser } from "@/app/actions/auth";
+import { getCurrentUser, type CurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { aiAgentStep, AiError, isAiConfigured, type AiMessage } from "@/lib/ai";
 import { getJson, setJson } from "@/lib/kvStore";
 import { AGENT_TOOLS, runTool, toolStatus, type AgentEvent, type ToolContext } from "@/app/ai-agent/tools";

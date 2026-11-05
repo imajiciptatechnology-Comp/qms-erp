@@ -1,4 +1,5 @@
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { getInspections } from "./actions";
 import InspectionView from "./InspectionView";
 import { notFound } from "next/navigation";

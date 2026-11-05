@@ -1,4 +1,5 @@
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { getMocRecords } from "./actions";
 import MocView from "./MocView";
 import { notFound } from "next/navigation";

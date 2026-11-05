@@ -1,4 +1,5 @@
-import { getCurrentUser, getRolesConfig } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { salesAccess } from "./lib";
 
 /** Untuk page: layout sudah menampilkan pesan "tidak ada akses", page cukup tidak memuat data. */

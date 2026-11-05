@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { getCurrentUser, getRolesConfig, type CurrentUser } from "@/app/actions/auth";
+import { getCurrentUser, type CurrentUser } from "@/app/actions/auth";
+import { getRolesConfig } from "@/lib/authServer";
 import { notifyPermission as createNotificationForPermission } from "@/lib/notificationStore";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { AiError } from "@/lib/ai";

@@ -1,5 +1,6 @@
 import { getDocuments } from "../actions";
-import { getCurrentUser, getRolesConfig, getAllUsers } from "@/app/actions/auth";
+import { getCurrentUser } from "@/app/actions/auth";
+import { getRolesConfig, getAllUsers } from "@/lib/authServer";
 import { redirect } from "next/navigation";
 import DocumentDetailClient from "./DocumentDetailClient";
 
