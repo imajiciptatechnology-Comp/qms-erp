@@ -91,7 +91,10 @@ async function loadContext(chatId: string) {
   if (!link) return null;
   const trip = await prisma.trip.findFirst({
     where: { driverId: link.driverId, isSimulated: false, status: { in: ACTIVE_TRIP_STATUSES } }, orderBy: { plannedStart: "asc" },
-    include: { vehicle: { include: { truckType: true } }, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } } },
+    include: {
+      vehicle: { include: { truckType: true } }, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } },
+      events: { where: { status: "SJHandover" }, take: 1, select: { at: true } },
+    },
   });
   return { link, driver: link.driver, trip };
 }
@@ -108,7 +111,13 @@ function tripText(c: NonNullable<Ctx>) {
     `Muat: ${t.order?.originName ?? "Pool"}${t.order ? ` · ${t.order.loadDate} ${t.order.loadTime ?? ""}` : ""}`,
     `Bongkar:\n${stops}`,
     t.helper ? `Kenek: ${t.helper.name}` : "",
-    `Status: ${TRIP_STATUSES[t.status]?.label ?? t.status}${t.status === "Scheduled" ? (t.p2hDoneAt ? " · P2H lolos ✅" : " · P2H belum ⚠️") : ""}`,
+    `Status: ${TRIP_STATUSES[t.status]?.label ?? t.status}`,
+    t.status === "Scheduled" ? [
+      "Sebelum berangkat:",
+      `${t.p2hDoneAt ? "✅" : "⬜"} 1. P2H${t.p2hDoneAt ? " lolos" : " — tekan 📝 Isi P2H"}`,
+      `${t.events.length ? "✅" : "⬜"} 2. Surat Jalan${t.events.length ? " sudah diambil di kantor" : t.suratJalanNo ? ` ${t.suratJalanNo} — tanda tangan & ambil di kantor` : " — belum terbit (menunggu kantor)"}`,
+      "⬜ 3. Tekan 🚚 Berangkat",
+    ].join("\n") : "",
     t.promisedArrival ? `Janji tiba ke klien: ${time(t.promisedArrival)}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -460,7 +469,7 @@ async function finishP2H(c: NonNullable<Ctx>, chatId: string, flow: P2HFlowState
   const fresh = (await loadContext(chatId))!;
   return reply(chatId, ctx, res.fails.length
     ? `${list}\n\n⚠️ Item non-kritis bermasalah (${res.fails.join(", ")}). Fleet Manager sudah diberi tahu; tunggu persetujuan (override) sebelum berangkat.`
-    : `${list}\n\n✅ P2H lolos. ${fresh.trip?.suratJalanNo ? "Silakan berangkat." : "Tunggu Surat Jalan terbit dari dispatcher, lalu berangkat."}`, { inline: await tripButtons(fresh) });
+    : `${list}\n\n✅ P2H lolos. ${fresh.trip?.events.length ? "Surat Jalan sudah diambil — silakan berangkat." : fresh.trip?.suratJalanNo ? "Langkah berikut: datang ke kantor, tanda tangan & ambil Surat Jalan. Setelah itu tekan 🚚 Berangkat." : "Tunggu Surat Jalan terbit, lalu ambil di kantor sebelum berangkat."}`, { inline: await tripButtons(fresh) });
 }
 
 async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string, source: "text" | "voice") {

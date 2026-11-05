@@ -7,6 +7,7 @@ import { TRIP_STATUSES } from "../../trackingLib";
 import { Card, InfoRow } from "../../ui";
 import P2HRecordView from "../P2HRecordView";
 import { chatProofFor, submittedBy } from "../data";
+import { DeleteP2HButton } from "../../trips/[id]/TripControls";
 
 /** Satu catatan P2H lengkap: hasil per item, keterangan/foto, dan pesan sopir di chat sebagai bukti. */
 export default async function P2HRecordPage({ params }: { params: Promise<{ id: string }> }) {
@@ -43,6 +44,9 @@ export default async function P2HRecordPage({ params }: { params: Promise<{ id: 
           <InfoRow label="Surat Jalan">{check.trip?.suratJalanNo ?? "—"}</InfoRow>
           <InfoRow label="ID catatan"><span className="font-mono text-xs">{check.id}</span></InfoRow>
           <p className="text-xs text-slate-500 mt-3">Catatan P2H tidak bisa diubah. P2H ulang (mis. setelah perbaikan) disimpan sebagai catatan baru.</p>
+          {(access.canFleet || access.canDispatch) && (!check.trip || ["Scheduled", "Cancelled"].includes(check.trip.status) || access.isSuperAdmin) && (
+            <div className="mt-4 pt-3 border-t border-slate-100"><DeleteP2HButton id={check.id} /></div>
+          )}
         </Card>
       </div>
     </div>

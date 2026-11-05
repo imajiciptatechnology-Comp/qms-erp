@@ -13,7 +13,7 @@ const fmt = (iso: string) => new Date(iso).toLocaleString("id-ID", { day: "2-dig
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const RESULTS = { all: "All results", pass: "Lolos", override: "Perlu override", fail: "Gagal (kritis)" } as const;
 
-type Search = { result?: string; vehicle?: string; driver?: string; from?: string; to?: string };
+type Search = { result?: string; vehicle?: string; driver?: string; from?: string; to?: string; deleted?: string };
 
 /** Log P2H: semua pemeriksaan harian yang dikirim sopir (dan P2H ulang di kantor) sebagai bukti/audit. */
 export default async function P2HRecordsPage({ searchParams }: { searchParams: Promise<Search> }) {
@@ -48,6 +48,7 @@ export default async function P2HRecordsPage({ searchParams }: { searchParams: P
 
   return (
     <div className="space-y-6">
+      {sp.deleted && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">Catatan P2H dihapus. Alasan tercatat di timeline trip dan Direktur Operasional diberi tahu.</p>}
       <Card title="P2H records" actions={<span className="text-xs text-slate-500">Bukti pemeriksaan harian dari sopir — untuk audit & investigasi</span>}>
         <form className="flex flex-wrap items-end gap-2 mb-4" method="get">
           <label className="text-xs text-slate-500">From<input type="date" name="from" defaultValue={from} className={`${sel} block mt-0.5`} /></label>

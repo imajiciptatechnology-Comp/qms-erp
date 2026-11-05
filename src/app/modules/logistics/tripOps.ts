@@ -4,7 +4,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { today } from "./lib";
 import { withLock, type Tx } from "./dbUtil";
-import { P2H_ITEMS, p2hNotesText, type P2HDetail, type P2HResult } from "./p2hLib";
+import { P2H_ITEMS, p2hNotesText, parseP2HRecord, type P2HDetail, type P2HResult } from "./p2hLib";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, firstUnloadMin, parsePlan } from "./trackingLib";
 import { buildPlan } from "./tracking";
 import { driverConditions, dutyWarnings, evaluateTrip, orderConditions, vehicleConditions, vehicleRuleInclude, type Condition } from "./dispatchRules";
@@ -46,6 +46,7 @@ export async function applyTripStatus(tripId: string, to: string, by: string, so
   if (to === "ToLoad") {
     if (!trip.p2hDoneAt) throw new Error("Isi P2H dulu sebelum berangkat (tekan ✅ P2H).");
     if (!trip.suratJalanNo) throw new Error("Surat Jalan belum terbit. Hubungi dispatcher.");
+    if (!(await sjHandover(tripId))) throw new Error("Surat Jalan belum diambil di kantor. Datang ke kantor untuk tanda tangan & ambil Surat Jalan, lalu tekan Berangkat lagi.");
     const ev = await evaluateTrip(tripId);
     if (ev.blocked.length || ev.pending.length) throw new Error(`Trip diblokir: ${[...ev.blocked, ...ev.pending].map(c => c.text).join("; ")}. Hubungi dispatcher.`);
   }
@@ -126,6 +127,102 @@ export async function recordP2H(tripId: string, result: P2HResult, notes: string
     ...(odometerKm != null && odometerKm > current.vehicle.odometerKm ? [prisma.vehicle.update({ where: { id: current.vehicleId }, data: { odometerKm } })] : []),
   ]);
   return { status: passed ? ("passed" as const) : ("failed" as const), unknown: [] as string[], fails: fails.map(i => i.label), critical: critical.map(i => i.label), other: other.map(i => i.label) };
+}
+
+// ---------------------------------------------------------
+// Serah terima Surat Jalan di kantor (sesudah P2H lolos, sebelum berangkat)
+// ---------------------------------------------------------
+
+export const SJ_HANDOVER = "SJHandover";
+
+/** Catatan serah terima SJ untuk trip ini (TripEvent status "SJHandover"), atau null. */
+export async function sjHandover(tripId: string) {
+  return prisma.tripEvent.findFirst({ where: { tripId, status: SJ_HANDOVER }, orderBy: { at: "desc" } });
+}
+
+export type HandoverInput = { signed: boolean; orderDocs: boolean; allowance: number | null; sealNo: string | null; notes: string | null };
+
+/**
+ * Sopir datang ke kantor: tanda tangan & ambil Surat Jalan (plus dokumen order, uang jalan, nomor segel).
+ * Syarat: trip belum berangkat, Surat Jalan sudah terbit, P2H sudah lolos. Hanya sekali per trip.
+ */
+export async function recordSjHandover(tripId: string, input: HandoverInput, by: string) {
+  if (!input.signed) throw new Error("Centang: Surat Jalan sudah ditandatangani sopir.");
+  if (input.allowance != null && (!Number.isFinite(input.allowance) || input.allowance < 0 || input.allowance > 100_000_000)) throw new Error("Uang jalan tidak valid.");
+  return withLock(`logistics:trip:${tripId}`, async tx => {
+    const trip = await tx.trip.findUniqueOrThrow({ where: { id: tripId }, include: { driver: { select: { name: true } } } });
+    if (trip.status !== "Scheduled") throw new Error("Serah terima Surat Jalan hanya sebelum trip berangkat.");
+    if (!trip.suratJalanNo) throw new Error("Surat Jalan belum terbit (masih ada kondisi blokir yang perlu override).");
+    if (!trip.p2hDoneAt) throw new Error("P2H sopir belum lolos. Sopir isi P2H dulu di bot, baru ambil Surat Jalan.");
+    if (await tx.tripEvent.findFirst({ where: { tripId, status: SJ_HANDOVER } })) throw new Error("Surat Jalan trip ini sudah diserahkan.");
+    const note = [
+      input.orderDocs ? "Dokumen order klien (DO/PO) diserahkan" : "",
+      input.allowance ? `Uang jalan Rp ${Math.round(input.allowance).toLocaleString("id-ID")}` : "",
+      input.sealNo ? `Segel ${input.sealNo.slice(0, 40)}` : "",
+      input.notes ? input.notes.slice(0, 300) : "",
+    ].filter(Boolean).join(" · ");
+    return tx.tripEvent.create({ data: {
+      tripId, status: SJ_HANDOVER, at: new Date().toISOString(), source: "Kantor", by,
+      label: `Surat Jalan ${trip.suratJalanNo} ditandatangani & diambil ${trip.driver.name} di kantor (diserahkan ${by})`, note: note || null,
+    } });
+  });
+}
+
+// ---------------------------------------------------------
+// Hapus catatan (dengan alasan & jejak audit)
+// ---------------------------------------------------------
+
+const MOVING = ["ToLoad", "Loading", "InTransit", "Unloading", "Returning"];
+
+/**
+ * Hapus trip. Trip yang sedang jalan tidak bisa dihapus; trip selesai hanya oleh Super Admin.
+ * Order yang masih "Scheduled" karena trip ini kembali ke "Confirmed". P2H trip ikut terhapus.
+ */
+export async function deleteTripRecord(tripId: string, reason: string, by: { name: string; role: string; isSuperAdmin: boolean }) {
+  const trip = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, include: { vehicle: { select: { plateNo: true } } } });
+  if (MOVING.includes(trip.status)) throw new Error("Trip sedang berjalan — tidak bisa dihapus. Selesaikan atau tunggu trip selesai.");
+  if (trip.status === "Completed" && !by.isSuperAdmin) throw new Error("Trip yang sudah selesai hanya bisa dihapus Super Admin (jejak audit).");
+  const now = new Date().toISOString();
+  const checks = await prisma.preTripCheck.findMany({ where: { tripId }, select: { resultJson: true } });
+  await prisma.$transaction(async tx => {
+    await tx.preTripCheck.deleteMany({ where: { tripId } });
+    await tx.trip.delete({ where: { id: tripId } }); // event, ping, override ikut (cascade); chat tetap (tripId → null)
+    if (trip.orderId) {
+      const order = await tx.charterOrder.findUnique({ where: { id: trip.orderId } });
+      if (order) {
+        const list = JSON.parse(order.historyJson || "[]");
+        list.push({ id: String(list.length + 1), date: now, userName: by.name, action: `Trip ${trip.tripNo} dihapus: ${reason}` });
+        const backToQueue = order.status === "Scheduled" && !(await tx.trip.count({ where: { orderId: order.id, status: { in: ACTIVE_TRIP_STATUSES } } }));
+        await tx.charterOrder.update({ where: { id: order.id }, data: { historyJson: JSON.stringify(list), ...(backToQueue ? { status: "Confirmed" } : {}) } });
+      }
+    }
+    await tx.chatChannelLink.updateMany({ where: { stateJson: { contains: tripId } }, data: { stateJson: "{}" } });
+  });
+  return { trip, photos: checks.flatMap(c => Object.values(parseP2HRecord(c.resultJson).details).flatMap(d => d.photos ?? [])) };
+}
+
+/**
+ * Hapus satu catatan P2H. P2H trip yang sudah berangkat/selesai = bukti audit → hanya Super Admin.
+ * Status "P2H lolos" trip dihitung ulang dari P2H yang tersisa. Odometer truk tidak dikembalikan.
+ */
+export async function deleteP2HRecord(id: string, reason: string, by: { name: string; isSuperAdmin: boolean }) {
+  const check = await prisma.preTripCheck.findUniqueOrThrow({ where: { id }, include: { trip: { select: { id: true, tripNo: true, status: true } }, vehicle: { select: { plateNo: true } } } });
+  if (check.trip && check.trip.status !== "Scheduled" && check.trip.status !== "Cancelled" && !by.isSuperAdmin) {
+    throw new Error("P2H trip yang sudah berangkat/selesai adalah bukti audit — hanya Super Admin yang bisa menghapus.");
+  }
+  const when = new Date(check.at).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+  const result = check.criticalFails ? `gagal: ${check.criticalFails}` : check.otherFails ? `perlu override: ${check.otherFails}` : "lolos";
+  await prisma.$transaction(async tx => {
+    await tx.preTripCheck.delete({ where: { id } });
+    if (check.trip) {
+      if (check.trip.status === "Scheduled") {
+        const latest = await tx.preTripCheck.findFirst({ where: { tripId: check.trip.id }, orderBy: { at: "desc" } });
+        await tx.trip.update({ where: { id: check.trip.id }, data: { p2hDoneAt: latest && !latest.criticalFails ? latest.at : null } });
+      }
+      await tx.tripEvent.create({ data: { tripId: check.trip.id, status: "P2HDeleted", at: new Date().toISOString(), source: "Kantor", by: by.name, label: `Catatan P2H ${when} (${result}) dihapus oleh ${by.name}: ${reason}` } });
+    }
+  });
+  return { check, when, result, photos: Object.values(parseP2HRecord(check.resultJson).details).flatMap(d => d.photos ?? []) };
 }
 
 // ---------------------------------------------------------

@@ -4,9 +4,9 @@ import { ArrowLeft, Ban, CheckCircle2, FileText, ShieldAlert, ShieldCheck } from
 import { prisma } from "@/lib/prisma";
 import { getLogisticsAccess } from "../../server";
 import { canOverride, evaluateTrip, LEVEL_LABEL, CONTROL_ACTIONS } from "../../dispatchRules";
-import { TRIP_STATUSES } from "../../trackingLib";
+import { TRIP_STATUSES, gmapsPoint } from "../../trackingLib";
 import { Card, DocLinks, InfoRow } from "../../ui";
-import { OverrideForm, TripActions } from "./TripControls";
+import { OverrideForm, ShareLocation, SjHandoverForm, TripActions } from "./TripControls";
 import P2HCard from "./P2HCard";
 
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "—");
@@ -25,6 +25,7 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
   const st = TRIP_STATUSES[trip.status];
   const duty = trip.dutyAckJson ? (JSON.parse(trip.dutyAckJson) as { by: string; at: string; warnings: string[] }) : null;
   const preDeparture = trip.status === "Scheduled";
+  const handover = [...trip.events].reverse().find(e => e.status === "SJHandover") ?? null;
 
   return (
     <div className="space-y-6">
@@ -39,7 +40,8 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
         </div>
         <div className="flex flex-wrap gap-2">
           {trip.suratJalanNo && <DocLinks kind="surat-jalan" id={trip.id} label="Surat Jalan" />}
-          {!trip.isSimulated && <TripActions tripId={trip.id} canIssue={access.canDispatch && preDeparture && !trip.suratJalanNo && ev.blocked.length === 0 && ev.pending.length === 0} canCancel={access.canDispatch && preDeparture} />}
+          {!trip.isSimulated && <TripActions tripId={trip.id} tripNo={trip.tripNo} canIssue={access.canDispatch && preDeparture && !trip.suratJalanNo && ev.blocked.length === 0 && ev.pending.length === 0} canCancel={access.canDispatch && preDeparture}
+            canDelete={access.canDispatch && (["Scheduled", "Cancelled"].includes(trip.status) || (trip.status === "Completed" && access.isSuperAdmin))} />}
         </div>
       </div>
 
@@ -79,6 +81,27 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
 
           {!trip.isSimulated && <P2HCard checks={trip.preTripChecks} driverName={trip.driver.name} />}
 
+          {!trip.isSimulated && trip.status !== "Cancelled" && (
+            <Card title="Surat Jalan handover (office)" actions={<span className="text-xs text-slate-500">Wajib sesudah P2H lolos, sebelum berangkat</span>}>
+              {handover ? (
+                <div className="text-sm space-y-1">
+                  <p className="flex items-center gap-1.5 text-emerald-700 font-medium"><CheckCircle2 className="w-4 h-4" /> {handover.label}</p>
+                  <p className="text-xs text-slate-500">{fmt(handover.at)}{handover.note ? ` · ${handover.note}` : ""}</p>
+                </div>
+              ) : !preDeparture ? <p className="text-sm text-slate-500">Tidak ada catatan serah terima (trip dibuat sebelum langkah ini diwajibkan).</p> : (
+                <div className="space-y-3">
+                  <ul className="text-sm space-y-1">
+                    <li className={trip.p2hDoneAt ? "text-emerald-700" : "text-amber-800"}>{trip.p2hDoneAt ? "✅" : "⬜"} P2H sopir {trip.p2hDoneAt ? `lolos · ${fmt(trip.p2hDoneAt)}` : "belum lolos (sopir isi lewat bot)"}</li>
+                    <li className={trip.suratJalanNo ? "text-emerald-700" : "text-amber-800"}>{trip.suratJalanNo ? "✅" : "⬜"} Surat Jalan {trip.suratJalanNo ? `${trip.suratJalanNo} terbit` : "belum terbit (selesaikan override)"}</li>
+                  </ul>
+                  {trip.p2hDoneAt && trip.suratJalanNo
+                    ? (access.canDispatch ? <SjHandoverForm tripId={trip.id} suratJalanNo={trip.suratJalanNo} driverName={trip.driver.name} /> : <p className="text-xs text-slate-500">Menunggu dispatcher mencatat serah terima.</p>)
+                    : <p className="text-xs text-slate-500">Form serah terima muncul setelah P2H lolos dan Surat Jalan terbit. Tombol Berangkat sopir terkunci sampai serah terima dicatat.</p>}
+                </div>
+              )}
+            </Card>
+          )}
+
           <Card title="Timeline">
             <ol className="relative border-l border-slate-200 ml-2 space-y-2.5">
               {trip.events.map(e => (
@@ -113,6 +136,12 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
             </Card>
           )}
           <Card title="Tracking">
+            {trip.lastLat != null && trip.lastLng != null ? (
+              <div className="mb-3 space-y-2">
+                <p className="text-sm text-slate-700">Posisi terakhir: {fmt(trip.lastPingAt)}{trip.lastSpeedKmh ? ` · ${Math.round(trip.lastSpeedKmh)} km/j` : ""}</p>
+                <ShareLocation plateNo={trip.vehicle.plateNo} tripNo={trip.tripNo} mapsUrl={gmapsPoint(trip.lastLat, trip.lastLng)} at={fmt(trip.lastPingAt)} trackingPath={trip.order ? `/track/${trip.order.trackingToken}` : null} />
+              </div>
+            ) : <p className="text-sm text-slate-500 mb-2">Belum ada lokasi dari HP sopir (sopir membagikan 📍 Lokasi Live di bot setelah berangkat).</p>}
             <Link href="/modules/logistics/tracking" className="text-sm text-blue-700 hover:underline">Buka Fleet Tracking</Link>
             {trip.order && <p className="text-xs text-slate-500 mt-1">Link klien: <a href={`/track/${trip.order.trackingToken}`} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">/track/…</a></p>}
           </Card>

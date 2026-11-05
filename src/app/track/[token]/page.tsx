@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getPublicTracking } from "@/app/modules/logistics/tracking";
-import { TRIP_STATUSES } from "@/app/modules/logistics/trackingLib";
+import { TRIP_STATUSES, gmapsPoint } from "@/app/modules/logistics/trackingLib";
 import PublicMap from "./PublicMap";
 
 export const metadata: Metadata = { title: "Lacak Pengiriman", robots: { index: false, follow: false } };
@@ -54,7 +54,7 @@ export default async function PublicTrackingPage({ params }: { params: Promise<{
         {trip && trip.lat != null && (
           <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
             <PublicMap lat={trip.lat} lng={trip.lng!} status={trip.status} plateNo={trip.plateNo} path={trip.path} />
-            <p className="text-xs text-slate-500 mt-2 px-1">Posisi terakhir: {fmt(trip.lastPingAt)} · halaman diperbarui otomatis tiap menit.</p>
+            <p className="text-xs text-slate-500 mt-2 px-1">Posisi terakhir: {fmt(trip.lastPingAt)} · halaman diperbarui otomatis tiap menit · <a href={gmapsPoint(trip.lat, trip.lng!)} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">Buka di Google Maps</a></p>
           </div>
         )}
 

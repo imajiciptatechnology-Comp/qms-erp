@@ -10,9 +10,12 @@ const th = "text-left font-semibold px-4 py-2.5 whitespace-nowrap";
 const td = "px-4 py-2.5 align-top";
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "—");
 
-export default async function TripsPage() {
+export default async function TripsPage({ searchParams }: { searchParams: Promise<{ cancelled?: string; deleted?: string }> }) {
   const { access } = await getLogisticsAccess();
   if (!access.canView) return null;
+  const { cancelled, deleted } = await searchParams;
+  const flash = cancelled ? `Trip ${cancelled.slice(0, 40)} dibatalkan. Sopir dikabari lewat bot; order-nya (bila ada) kembali ke antrean dispatch.`
+    : deleted ? `Trip ${deleted.slice(0, 40)} dihapus. Direktur Operasional diberi tahu; alasan tercatat di riwayat order (bila ada).` : null;
   const month = today().slice(0, 7);
   const [trips, overrides] = await Promise.all([
     prisma.trip.findMany({ where: { isSimulated: false }, include: { vehicle: true, driver: true, client: true, route: true, order: { select: { orderNo: true } }, _count: { select: { overrides: true } } }, orderBy: { createdAt: "desc" }, take: 100 }),
@@ -21,6 +24,7 @@ export default async function TripsPage() {
 
   return (
     <div className="space-y-6">
+      {flash && <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">{flash}</p>}
       <Card title={`Trips (${trips.length})`} actions={access.canDispatch ? <Link href="/modules/logistics/dispatch" className="text-sm text-blue-700 hover:underline">Dispatch board</Link> : null}>
         {trips.length === 0 ? <p className="text-sm text-slate-500">Belum ada trip. Assign order Confirmed di papan Dispatch.</p> : (
           <div className="overflow-x-auto -mx-5">

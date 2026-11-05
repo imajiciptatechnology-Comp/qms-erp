@@ -7,7 +7,8 @@ import { uploadToStorage } from "@/lib/uploadFile";
 import { guardAccess as guard, runAction as run } from "../server";
 import { consumeDailyQuota } from "../dbUtil";
 import { canOverride, evaluateTrip, LEVEL_LABEL } from "../dispatchRules";
-import { createTrip, issueSuratJalan } from "../tripOps";
+import { createTrip, deleteP2HRecord, deleteTripRecord, issueSuratJalan, recordSjHandover } from "../tripOps";
+import { deleteFromStorage } from "@/lib/uploadFile";
 import { notifyPermission } from "../fleetDocs";
 
 /** Dispatcher: assign truk + sopir (+ kenek) ke order Confirmed. */
@@ -128,4 +129,62 @@ export async function aiExplainDispatch(data: { order: string; truck: string; tr
   } catch (err) {
     return { ok: false as const, error: err instanceof AiError || err instanceof Error ? err.message : "Gagal." };
   }
+}
+
+/** Kantor: sopir datang, tanda tangan & ambil Surat Jalan (sesudah P2H lolos). Membuka tombol Berangkat. */
+export async function handOverSj(fd: FormData) {
+  return run(async () => {
+    const { user } = await guard(a => a.canDispatch);
+    const tripId = String(fd.get("tripId") ?? "");
+    const num = String(fd.get("allowance") ?? "").replace(/[.\s]/g, "").replace(",", ".");
+    const str = (k: string) => { const v = String(fd.get(k) ?? "").trim(); return v || null; };
+    await recordSjHandover(tripId, {
+      signed: fd.get("signed") === "on", orderDocs: fd.get("orderDocs") === "on",
+      allowance: num ? Number(num) : null, sealNo: str("sealNo"), notes: str("notes"),
+    }, user.name);
+    after(async () => {
+      const { notifyDriverHandover } = await import("../bot/driverNotify");
+      await notifyDriverHandover(tripId, user.name).catch(err => console.error("[dispatch] notify handover", err));
+    });
+    return tripId;
+  });
+}
+
+const reasonOf = (r: string) => {
+  const reason = String(r ?? "").trim().slice(0, 300);
+  if (reason.length < 5) throw new Error("Alasan penghapusan wajib diisi (min. 5 karakter).");
+  return reason;
+};
+
+/** Hapus trip (alasan wajib). Jejak: riwayat order + notifikasi Direktur Operasional. */
+export async function deleteTrip(tripId: string, reason: string) {
+  return run(async () => {
+    const { user, access } = await guard(a => a.canDispatch);
+    const why = reasonOf(reason);
+    const { trip, photos } = await deleteTripRecord(tripId, why, { name: user.name, role: user.role, isSuperAdmin: access.isSuperAdmin });
+    after(async () => {
+      await notifyPermission("logistics_override_director", [`Trip ${trip.tripNo} (${trip.vehicle.plateNo}) DIHAPUS oleh ${user.name} (${user.role}): ${why}`], "/modules/logistics/trips");
+      // Trip yang belum berangkat: sopir dikabari supaya tidak berangkat.
+      if (trip.status === "Scheduled" && !trip.isSimulated) {
+        const { sendToDriver } = await import("../bot/telegramBot");
+        await sendToDriver(trip.driverId, `❌ Tugas ${trip.tripNo} (${trip.vehicle.plateNo}) DIBATALKAN oleh kantor (${user.name}).\nAlasan: ${why}\nTidak perlu berangkat.`, { sentBy: user.name }).catch(() => {});
+      }
+      for (const url of photos) await deleteFromStorage(url);
+    });
+    return trip.tripNo;
+  });
+}
+
+/** Hapus satu catatan P2H (alasan wajib). Jejak: timeline trip + notifikasi Direktur Operasional. */
+export async function deleteP2H(id: string, reason: string) {
+  return run(async () => {
+    const { user, access } = await guard(a => a.canFleet || a.canDispatch);
+    const why = reasonOf(reason);
+    const { check, when, result, photos } = await deleteP2HRecord(id, why, { name: user.name, isSuperAdmin: access.isSuperAdmin });
+    after(async () => {
+      await notifyPermission("logistics_override_director", [`Catatan P2H ${check.vehicle.plateNo} ${when} (${result})${check.trip ? ` trip ${check.trip.tripNo}` : ""} DIHAPUS oleh ${user.name}: ${why}`], check.trip ? `/modules/logistics/trips/${check.trip.id}` : "/modules/logistics/p2h");
+      for (const url of photos) await deleteFromStorage(url);
+    });
+    return check.trip?.id ?? undefined;
+  });
 }

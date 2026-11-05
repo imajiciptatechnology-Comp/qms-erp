@@ -20,6 +20,10 @@ export const TRIP_STATUSES: Record<string, { label: string; color: string; badge
   Cancelled: { label: "Dibatalkan", color: "#dc2626", badge: "bg-red-100 text-red-700 border-red-200" },
 };
 
+/** Tautan Google Maps (gratis, tanpa API key): titik posisi & navigasi ke tujuan. */
+export const gmapsPoint = (lat: number, lng: number) => `https://www.google.com/maps/search/?api=1&query=${lat.toFixed(6)},${lng.toFixed(6)}`;
+export const gmapsDirections = (lat: number, lng: number) => `https://www.google.com/maps/dir/?api=1&destination=${lat.toFixed(6)},${lng.toFixed(6)}&travelmode=driving`;
+
 export const ACTIVE_TRIP_STATUSES = ["Scheduled", "ToLoad", "Loading", "InTransit", "Unloading", "Returning"];
 export const DRIVING_STATUSES = ["ToLoad", "InTransit", "Returning"];
 

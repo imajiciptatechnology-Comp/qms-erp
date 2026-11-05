@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { AlertTriangle, Copy, Loader2, MapPin, Play, RefreshCw, Smartphone, Sparkles, Square, Truck, Wrench, X } from "lucide-react";
 import { Card, StatCard, btnPrimary, btnSecondary } from "../ui";
-import { TRIP_STATUSES } from "../trackingLib";
+import { TRIP_STATUSES, gmapsPoint } from "../trackingLib";
 import type { DeployedUnit, FleetSnapshot } from "../tracking";
 import type { MapUnit } from "./FleetMap";
 import { aiFleetSummary, fetchFleetSnapshot, runSimulation, stopSimulation } from "./actions";
@@ -209,7 +209,8 @@ function UnitRow({ u, now, selected, onSelect }: { u: DeployedUnit; now: number;
         {u.orderId && <Link href={`/modules/logistics/orders/${u.orderId}`} onClick={e => e.stopPropagation()} className="text-xs text-blue-700 hover:underline">{u.orderNo}</Link>}
       </td>
       <td className="px-4 py-2.5 align-top"><StatusPill status={u.status} /><span className="block text-xs text-slate-500 mt-1">sejak {hm(u.statusSince)}</span></td>
-      <td className="px-4 py-2.5 align-top whitespace-nowrap text-xs">{ago(u.lastPingAt, now)}{u.speedKmh ? <span className="block text-slate-500">{u.speedKmh} km/j</span> : null}</td>
+      <td className="px-4 py-2.5 align-top whitespace-nowrap text-xs">{ago(u.lastPingAt, now)}{u.speedKmh ? <span className="block text-slate-500">{u.speedKmh} km/j</span> : null}
+        {u.lat != null && u.lng != null && <a href={gmapsPoint(u.lat, u.lng)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="block text-blue-700 hover:underline">Google Maps ↗</a>}</td>
       <td className="px-4 py-2.5 align-top whitespace-nowrap text-xs">
         {u.etaFirstStop ? <span className={late ? "text-red-700 font-semibold" : "text-slate-800"}>ETA {hm(u.etaFirstStop)}</span> : <span className="text-slate-500">sudah tiba</span>}
         {u.promisedArrival && <span className="block text-slate-500">janji {hm(u.promisedArrival)}</span>}
