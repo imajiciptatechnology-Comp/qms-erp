@@ -61,6 +61,7 @@ export default async function VehicleDetail({ params, searchParams }: { params: 
               <ul className="space-y-1 text-sm">{conds.map(c => <li key={c.key} className={c.level === "none" ? "text-red-700" : "text-amber-800"}>#{c.code} {c.text} <span className="text-xs opacity-75">· {LEVEL_LABEL[c.level]}</span></li>)}</ul>
             )}
             <p className="text-xs text-slate-500 mt-3">P2H terakhir: {p2h ? `${p2h.at.slice(0, 16).replace("T", " ")} · ${p2h.criticalFails ? `gagal kritis (${p2h.criticalFails})` : p2h.otherFails ? `gagal non-kritis (${p2h.otherFails})` : "semua OK"} · ${p2h.source}` : "—"}</p>
+            <Link href={`/modules/logistics/p2h?vehicle=${v.id}`} className="text-xs font-medium text-blue-700 hover:underline">Riwayat P2H truk ini →</Link>
             {access.canFleet && p2h && (p2h.criticalFails || p2h.otherFails) && <div className="mt-2"><OfficeP2HButton vehicleId={v.id} /></div>}
           </Card>
           <Card title="Validity (from verified documents)" actions={<Link href={`${base}?tab=documents`} className="text-sm text-blue-700 hover:underline">Documents{drafts ? ` · ${drafts} draft` : ""}</Link>}>

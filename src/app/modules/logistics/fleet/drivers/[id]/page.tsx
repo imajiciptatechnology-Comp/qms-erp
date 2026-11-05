@@ -57,7 +57,7 @@ export default async function DriverDetail({ params, searchParams }: { params: P
             </InfoRow>
             {d.notes && <InfoRow label="Catatan">{d.notes}</InfoRow>}
           </Card>
-          <Card title="Telegram bot">
+          <Card title="Telegram bot" actions={<Link href={`/modules/logistics/p2h?driver=${d.id}`} className="text-sm text-blue-700 hover:underline">P2H records</Link>}>
             <TelegramConnect driverId={d.id} driverName={d.name} configured={isTelegramConfigured()} canManage={access.canFleet}
               linked={link?.linkedAt ? { chatName: link.chatName, chatUsername: link.chatUsername, linkedAt: link.linkedAt } : null} />
           </Card>

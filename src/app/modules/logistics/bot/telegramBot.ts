@@ -11,7 +11,7 @@ import { consumeDailyQuota } from "../dbUtil";
 import { scanFleetDocument } from "../ai/scanFleetDoc";
 import { applyTripStatus, nextActions, recordP2H, stopsTotalOf } from "../tripOps";
 import { P2H_ITEMS, p2hItem, parseOdometer, type P2HResult } from "../p2hLib";
-import { checklistButtons, checklistText, detailButtons, detailPrompt, hasDetail, isP2HFlow, nextMark, odometerPrompt, odometerProblem, summaryLines, uncheckedItems, type P2HFlowState } from "./p2hFlow";
+import { checklistButtons, checklistText, detailButtons, detailPrompt, hasDetail, isP2HFlow, odometerPrompt, odometerProblem, summaryLines, uncheckedItems, type P2HFlowState } from "./p2hFlow";
 import { analyzeDriverPhoto, interpretDriverText, parseP2HText } from "./ai";
 
 // ---------- Tipe update Telegram (yang dipakai saja) ----------
@@ -241,7 +241,11 @@ async function handleCallback(c: NonNullable<Ctx>, chatId: string, cbId: string,
   // P2H: hanya sebelum berangkat. Tombol "semua OK" lama (p2hok) tidak dipakai lagi — P2H wajib per item.
   if (kind === "p2hok" || kind === "p2hstart" || kind === "pc" || kind === "pd") {
     if (c.trip.status !== "Scheduled") { await answer(); return reply(chatId, ctx, "Trip sudah berjalan, jadi P2H tidak diubah lagi.", { inline: await tripButtons(c) }); }
-    if (kind === "p2hok" || kind === "p2hstart") { await answer(); return startP2H(c, chatId); }
+    if (kind === "p2hok" || kind === "p2hstart") {
+      await answer();
+      await log({ chatId, ...ctx, direction: "in", kind: "button", text: "📝 Isi P2H" });
+      return startP2H(c, chatId);
+    }
     const flow = getState(c);
     if (!isP2HFlow(flow) || flow.tripId !== c.trip.id) { await answer(); return reply(chatId, ctx, "Tombol ini sudah tidak berlaku. Tekan 📝 Isi P2H untuk mulai lagi.", { inline: await tripButtons(c) }); }
     if (kind === "pc") return handleP2HCheck(c, chatId, flow, to, answer);
@@ -269,7 +273,46 @@ async function handleCallback(c: NonNullable<Ctx>, chatId: string, cbId: string,
 async function setState(c: NonNullable<Ctx>, state: Record<string, unknown>) {
   await prisma.chatChannelLink.update({ where: { id: c.link.id }, data: { stateJson: JSON.stringify(state) } });
 }
-const getState = (c: NonNullable<Ctx>) => { try { return JSON.parse(c.link.stateJson || "{}") as { awaiting?: string; tripId?: string }; } catch { return {}; } };
+const parseState = (json: string | null | undefined) => { try { return JSON.parse(json || "{}") as { awaiting?: string; tripId?: string }; } catch { return {}; } };
+const getState = (c: NonNullable<Ctx>) => parseState(c.link.stateJson);
+
+/**
+ * Ubah status alur P2H secara atomik (compare-and-swap pada stateJson). Sopir bisa menekan beberapa tombol
+ * checklist dalam satu detik; webhook memprosesnya bersamaan, jadi baca-ubah-tulis biasa bisa menghilangkan tap.
+ * `fn` menerima salinan status terbaru; kembalikan status baru, atau null untuk tidak mengubah apa-apa.
+ * Hasil: { before, after } — after null bila alur sudah tidak aktif atau fn menolak.
+ */
+async function updateFlow(c: NonNullable<Ctx>, fn: (s: P2HFlowState) => P2HFlowState | Record<string, never> | null) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const row = await prisma.chatChannelLink.findUnique({ where: { id: c.link.id }, select: { stateJson: true } });
+    const cur = parseState(row?.stateJson);
+    if (!isP2HFlow(cur)) return { before: null, after: null };
+    const next = fn(JSON.parse(JSON.stringify(cur)) as P2HFlowState);
+    if (!next) return { before: cur, after: null };
+    const res = await prisma.chatChannelLink.updateMany({ where: { id: c.link.id, stateJson: row!.stateJson }, data: { stateJson: JSON.stringify(next) } });
+    if (res.count) return { before: cur, after: isP2HFlow(next) ? next : null, cleared: !isP2HFlow(next) };
+    await new Promise(r => setTimeout(r, 30 + Math.random() * 120 * (attempt + 1))); // jeda acak sebelum coba lagi
+  }
+  throw new Error("Bot sedang sibuk, tekan lagi tombolnya.");
+}
+
+/**
+ * Tap checklist: ubah satu item dalam SATU pernyataan SQL (Postgres mengunci baris), jadi banyak tap
+ * yang datang bersamaan semuanya tercatat tanpa coba-ulang. Mengembalikan status sesudah tap, atau null
+ * bila checklist ini sudah tidak aktif.
+ */
+async function toggleP2HMark(c: NonNullable<Ctx>, tripId: string, key: string): Promise<P2HFlowState | null> {
+  const rows = await prisma.$queryRaw<{ stateJson: string }[]>`
+    UPDATE "ChatChannelLink"
+    SET "stateJson" = jsonb_set(
+      "stateJson"::jsonb, ARRAY['marks', ${key}]::text[],
+      to_jsonb(CASE WHEN ("stateJson"::jsonb -> 'marks' ->> ${key}) = 'ok' THEN 'fail' ELSE 'ok' END), true
+    )::text
+    WHERE "id" = ${c.link.id} AND ("stateJson"::jsonb ->> 'awaiting') = 'p2h-check' AND ("stateJson"::jsonb ->> 'tripId') = ${tripId}
+    RETURNING "stateJson"`;
+  const s = rows[0] ? parseState(rows[0].stateJson) : null;
+  return s && isP2HFlow(s) ? s : null;
+}
 
 // ---------------------------------------------------------
 // P2H rinci (lihat bot/p2hFlow.ts)
@@ -288,75 +331,90 @@ async function startP2H(c: NonNullable<Ctx>, chatId: string, prefill: Record<str
   await setState(c, state);
 }
 
-async function handleP2HCheck(c: NonNullable<Ctx>, chatId: string, flow: P2HFlowState, key: string, answer: (t?: string) => Promise<void>) {
-  const ctx = { driverId: c.driver.id, tripId: flow.tripId };
-  if (flow.awaiting !== "p2h-check") { await answer(); return; }
+async function handleP2HCheck(c: NonNullable<Ctx>, chatId: string, _flow: P2HFlowState, key: string, answer: (t?: string) => Promise<void>) {
+  const ctx = { driverId: c.driver.id, tripId: _flow.tripId };
   if (key !== "done") {
     const it = p2hItem(key);
     if (!it) { await answer(); return; }
-    flow.marks[key] = nextMark(flow.marks[key]);
-    await setState(c, flow);
-    await editButtons(chatId, flow, checklistButtons(flow.tripId, flow.marks));
-    await answer(`${it.label}: ${flow.marks[key] === "ok" ? "baik ✅" : "bermasalah ❌"}`);
+    const after = await toggleP2HMark(c, _flow.tripId, key);
+    if (!after) { await answer("Checklist ini sudah dikirim."); return; }
+    await editButtons(chatId, after, checklistButtons(after.tripId, after.marks));
+    await answer(`${it.label}: ${after.marks[key] === "ok" ? "baik ✅" : "bermasalah ❌"}`);
     return;
   }
   await answer();
-  const missing = uncheckedItems(flow.marks);
+  // Selesai cek: hanya bila semua item sudah dicek; peralihan ke langkah berikut dilakukan sekali (klik ganda aman).
+  let missing: ReturnType<typeof uncheckedItems> = [];
+  const { before, after } = await updateFlow(c, s => {
+    if (s.awaiting !== "p2h-check") return null;
+    missing = uncheckedItems(s.marks);
+    if (missing.length) return null;
+    const fails = P2H_ITEMS.filter(i => s.marks[i.key] === "fail").map(i => i.key);
+    return fails.length ? { ...s, awaiting: "p2h-detail", queue: fails.slice(1), current: fails[0] } : { ...s, awaiting: "p2h-odo" };
+  });
   if (missing.length) return reply(chatId, ctx, `Masih ${missing.length} item belum dicek: ${missing.map(i => i.label).join(", ")}. Tekan tombolnya di checklist (⬜ → ✅ atau ❌).`);
-  await log({ chatId, ...ctx, direction: "in", kind: "button", text: `P2H dicek: ${P2H_ITEMS.filter(i => flow.marks[i.key] === "fail").map(i => `❌ ${i.label}`).join(", ") || "semua ✅"}` });
-  await editButtons(chatId, flow, []); // checklist dikunci
-  const fails = P2H_ITEMS.filter(i => flow.marks[i.key] === "fail").map(i => i.key);
-  if (fails.length) {
-    const next: P2HFlowState = { ...flow, awaiting: "p2h-detail", queue: fails.slice(1), current: fails[0] };
-    await setState(c, next);
-    return reply(chatId, ctx, detailPrompt(fails[0], fails.length), { inline: detailButtons(flow.tripId) });
-  }
-  await setState(c, { ...flow, awaiting: "p2h-odo" });
-  return reply(chatId, ctx, `✅ Semua item baik.
-
-${odometerPrompt(c.trip!.vehicle.odometerKm)}`);
+  if (!after || !before) return;
+  await log({ chatId, ...ctx, direction: "in", kind: "button", text: `P2H dicek: ${P2H_ITEMS.filter(i => after.marks[i.key] === "fail").map(i => `❌ ${i.label}`).join(", ") || "semua ✅"}` });
+  await editButtons(chatId, after, []); // checklist dikunci
+  if (after.awaiting === "p2h-detail") return reply(chatId, ctx, detailPrompt(after.current!, (after.queue?.length ?? 0) + 1), { inline: detailButtons(after.tripId) });
+  return reply(chatId, ctx, `✅ Semua item baik.\n\n${odometerPrompt(c.trip!.vehicle.odometerKm)}`);
 }
 
 /** Tombol "Lanjut" di langkah keterangan: wajib ada keterangan atau foto untuk item ini. */
-async function nextP2HDetail(c: NonNullable<Ctx>, chatId: string, flow: P2HFlowState) {
-  const ctx = { driverId: c.driver.id, tripId: flow.tripId };
-  const cur = flow.current!;
-  if (!hasDetail(flow.details[cur])) return reply(chatId, ctx, `Isi dulu keterangan atau foto untuk ${p2hItem(cur)?.label ?? cur}, lalu tekan ➡️ Lanjut.`, { inline: detailButtons(flow.tripId) });
-  const [next, ...rest] = flow.queue ?? [];
-  if (next) {
-    await setState(c, { ...flow, queue: rest, current: next });
-    return reply(chatId, ctx, detailPrompt(next, rest.length + 1), { inline: detailButtons(flow.tripId) });
-  }
-  await setState(c, { ...flow, awaiting: "p2h-odo", queue: [], current: undefined });
+async function nextP2HDetail(c: NonNullable<Ctx>, chatId: string, _flow: P2HFlowState) {
+  const ctx = { driverId: c.driver.id, tripId: _flow.tripId };
+  let blocked: string | null = null;
+  const { after } = await updateFlow(c, s => {
+    if (s.awaiting !== "p2h-detail" || !s.current) return null;
+    if (!hasDetail(s.details[s.current])) { blocked = s.current; return null; }
+    const [next, ...rest] = s.queue ?? [];
+    return next ? { ...s, queue: rest, current: next } : { ...s, awaiting: "p2h-odo", queue: [], current: undefined };
+  });
+  if (blocked) return reply(chatId, ctx, `Isi dulu keterangan atau foto untuk ${p2hItem(blocked)?.label ?? blocked}, lalu tekan ➡️ Lanjut.`, { inline: detailButtons(_flow.tripId) });
+  if (!after) return;
+  if (after.awaiting === "p2h-detail") return reply(chatId, ctx, detailPrompt(after.current!, (after.queue?.length ?? 0) + 1), { inline: detailButtons(after.tripId) });
   return reply(chatId, ctx, odometerPrompt(c.trip!.vehicle.odometerKm));
 }
+
+/** Tambah keterangan/foto ke item yang sedang ditanyakan. */
+const addDetail = (s: P2HFlowState, note?: string, photo?: string): P2HFlowState | null => {
+  if (s.awaiting !== "p2h-detail" || !s.current) return null;
+  const d = { ...(s.details[s.current] ?? {}) };
+  if (note) d.note = [d.note, note.slice(0, 300)].filter(Boolean).join("; ");
+  if (photo) d.photos = [...(d.photos ?? []), photo].slice(0, 5);
+  return { ...s, details: { ...s.details, [s.current]: d } };
+};
 
 /** Teks (atau hasil transkripsi voice) saat alur P2H berjalan. */
 async function handleP2HInput(c: NonNullable<Ctx>, chatId: string, text: string, flow: P2HFlowState) {
   const ctx = { driverId: c.driver.id, tripId: flow.tripId };
   if (flow.awaiting === "p2h-detail" && flow.current) {
-    const d = flow.details[flow.current] ?? {};
-    d.note = [d.note, text.slice(0, 300)].filter(Boolean).join("; ");
-    await setState(c, { ...flow, details: { ...flow.details, [flow.current]: d } });
-    return reply(chatId, ctx, `📝 Dicatat untuk ${p2hItem(flow.current)?.label}: "${d.note}".
-Kirim 📷 foto juga bila ada, lalu tekan ➡️ Lanjut.`, { inline: detailButtons(flow.tripId) });
+    const { after } = await updateFlow(c, s => addDetail(s, text));
+    if (!after?.current) return;
+    const d = after.details[after.current];
+    return reply(chatId, ctx, `📝 Dicatat untuk ${p2hItem(after.current)?.label}: "${d?.note}".\nKirim 📷 foto juga bila ada, lalu tekan ➡️ Lanjut.`, { inline: detailButtons(flow.tripId) });
   }
   if (flow.awaiting === "p2h-odo") {
     const km = parseOdometer(text);
     if (km == null) return reply(chatId, ctx, "Ketik angka odometer saja, mis. 128450.");
     const problem = odometerProblem(km, c.trip!.vehicle.odometerKm);
     if (problem) return reply(chatId, ctx, problem);
-    return finishP2H(c, chatId, flow, km);
+    // Alur ditutup secara atomik dulu: dua pesan odometer bersamaan tidak menyimpan P2H dua kali.
+    const { before, cleared } = await updateFlow(c, s => (s.awaiting === "p2h-odo" ? {} : null));
+    if (!before || !cleared) return;
+    return finishP2H(c, chatId, before as P2HFlowState, km);
   }
   // Langkah checklist: teks/voice bebas → AI mengisi saran, sopir mengecek sisanya.
   if (!isAiConfigured()) return reply(chatId, ctx, "Tekan tombol di checklist untuk setiap item (⬜ → ✅ / ❌).");
   if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Isi checklist dengan tombol.");
   try {
     const { result, notes } = await parseP2HText(text);
-    const marks = { ...flow.marks };
+    const cur = parseState((await prisma.chatChannelLink.findUnique({ where: { id: c.link.id }, select: { stateJson: true } }))?.stateJson);
+    const base = isP2HFlow(cur) ? cur : flow;
+    const marks = { ...base.marks };
     for (const [k, v] of Object.entries(result)) if (v === "ok" || v === "fail") marks[k] = v;
-    await editButtons(chatId, flow, []); // checklist lama dikunci; checklist baru dikirim di bawah
-    return startP2H(c, chatId, marks, [flow.aiNotes, notes].filter(Boolean).join("; ") || undefined);
+    await editButtons(chatId, base, []); // checklist lama dikunci; checklist baru dikirim di bawah
+    return startP2H(c, chatId, marks, [base.aiNotes, notes].filter(Boolean).join("; ") || undefined);
   } catch (err) {
     console.error("[bot] p2h ai", err);
     return reply(chatId, ctx, "Pesan belum bisa dibaca otomatis. Isi checklist dengan tombol ya, Pak.");
@@ -374,44 +432,35 @@ async function handleP2HPhoto(c: NonNullable<Ctx>, chatId: string, m: TgMessage,
     const fileUrl = photo.file_id.startsWith("url:") && isSimChat(chatId) ? photo.file_id.slice(4)
       : await (async () => { const { bytes } = await downloadFile(chatId, photo.file_id); return uploadToStorage(`logistics/p2h/${flow.tripId}`, new File([new Uint8Array(bytes)], `p2h-${Date.now()}.jpg`, { type: "image/jpeg" })); })();
     await log({ chatId, ...ctx, direction: "in", kind: "photo", text: m.caption ?? `Foto P2H: ${p2hItem(flow.current)?.label}`, fileUrl });
-    const d = flow.details[flow.current] ?? {};
-    d.photos = [...(d.photos ?? []), fileUrl].slice(0, 5);
-    if (m.caption?.trim()) d.note = [d.note, m.caption.trim().slice(0, 300)].filter(Boolean).join("; ");
-    await setState(c, { ...flow, details: { ...flow.details, [flow.current]: d } });
-    return reply(chatId, ctx, `📷 Foto ${p2hItem(flow.current)?.label} diterima (${d.photos.length}).${d.note ? "" : " Tambahkan keterangan singkat (ketik/voice) bila bisa."} Tekan ➡️ Lanjut bila sudah.`, { inline: detailButtons(flow.tripId) });
+    const { after } = await updateFlow(c, s => addDetail(s, m.caption?.trim() || undefined, fileUrl));
+    if (!after?.current) return;
+    const d = after.details[after.current] ?? {};
+    return reply(chatId, ctx, `📷 Foto ${p2hItem(after.current)?.label} diterima (${d.photos?.length ?? 0}).${d.note ? "" : " Tambahkan keterangan singkat (ketik/voice) bila bisa."} Tekan ➡️ Lanjut bila sudah.`, { inline: detailButtons(flow.tripId) });
   } catch (err) {
     console.error("[bot] p2h photo", err);
     return reply(chatId, ctx, "Foto gagal diterima. Coba kirim ulang, atau ketik keterangannya.", { inline: detailButtons(flow.tripId) });
   }
 }
 
-/** Simpan P2H + ringkasan ke sopir + notifikasi Fleet Manager. */
+/** Simpan P2H + ringkasan ke sopir + notifikasi Fleet Manager. Status alur sudah ditutup oleh pemanggil. */
 async function finishP2H(c: NonNullable<Ctx>, chatId: string, flow: P2HFlowState, odometerKm: number) {
   const ctx = { driverId: c.driver.id, tripId: flow.tripId };
   const result = Object.fromEntries(P2H_ITEMS.map(i => [i.key, flow.marks[i.key] ?? "unknown"])) as P2HResult;
   const res = await recordP2H(flow.tripId, result, flow.aiNotes ?? "", c.driver.name, p2hSource(chatId), { details: flow.details, odometerKm });
-  await setState(c, {});
   if (res.status === "late") return reply(chatId, ctx, "Trip sudah berjalan, jadi P2H tidak diubah lagi. Laporkan masalah kendaraan dengan pesan biasa (mis. \"ban bocor\").");
   if (res.status === "incomplete") return startP2H(c, chatId, flow.marks);
-  const list = `${summaryLines(flow.marks, flow.details)}
-🔢 Odometer ${odometerKm.toLocaleString("id-ID")} km`;
+  const list = `${summaryLines(flow.marks, flow.details)}\n🔢 Odometer ${odometerKm.toLocaleString("id-ID")} km`;
   const plate = c.trip!.vehicle.plateNo;
   const detailText = (keys: string[]) => keys.map(l => { const it = P2H_ITEMS.find(i => i.label === l); const d = it ? flow.details[it.key] : undefined; return `${l}${d?.note ? ` (${d.note})` : ""}`; }).join(", ");
   if (res.status === "failed") {
     await notifyPermission("logistics_fleet", [`P2H GAGAL ${plate} (${c.driver.name}): ${detailText(res.critical!)} — truk tidak boleh berangkat.`], `/modules/logistics/trips/${flow.tripId}`);
-    return reply(chatId, ctx, `${list}
-
-⛔ Item kritis bermasalah (${res.critical!.join(", ")}). Truk TIDAK BOLEH berangkat. Fleet Manager sudah diberi tahu; tunggu arahan.`);
+    return reply(chatId, ctx, `${list}\n\n⛔ Item kritis bermasalah (${res.critical!.join(", ")}). Truk TIDAK BOLEH berangkat. Fleet Manager sudah diberi tahu; tunggu arahan.`);
   }
   if (res.fails.length) await notifyPermission("logistics_fleet", [`P2H ${plate} (${c.driver.name}): item non-kritis bermasalah — ${detailText(res.fails)}. Perlu override Fleet sebelum berangkat.`], `/modules/logistics/trips/${flow.tripId}`);
   const fresh = (await loadContext(chatId))!;
   return reply(chatId, ctx, res.fails.length
-    ? `${list}
-
-⚠️ Item non-kritis bermasalah (${res.fails.join(", ")}). Fleet Manager sudah diberi tahu; tunggu persetujuan (override) sebelum berangkat.`
-    : `${list}
-
-✅ P2H lolos. ${fresh.trip?.suratJalanNo ? "Silakan berangkat." : "Tunggu Surat Jalan terbit dari dispatcher, lalu berangkat."}`, { inline: await tripButtons(fresh) });
+    ? `${list}\n\n⚠️ Item non-kritis bermasalah (${res.fails.join(", ")}). Fleet Manager sudah diberi tahu; tunggu persetujuan (override) sebelum berangkat.`
+    : `${list}\n\n✅ P2H lolos. ${fresh.trip?.suratJalanNo ? "Silakan berangkat." : "Tunggu Surat Jalan terbit dari dispatcher, lalu berangkat."}`, { inline: await tripButtons(fresh) });
 }
 
 async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string, source: "text" | "voice") {
