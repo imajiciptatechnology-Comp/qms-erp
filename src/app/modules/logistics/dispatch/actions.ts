@@ -23,8 +23,7 @@ export async function assignTrip(input: { orderId: string; vehicleId: string; dr
       const perm = { fleet: "logistics_override_fleet", ops: "logistics_override_ops", director: "logistics_override_director" }[level];
       await notifyPermission(perm, [`Trip ${trip.tripNo} (${driver.name}) butuh ${LEVEL_LABEL[level]}: ${list.map(c => c.text).join("; ")}`], `/modules/logistics/trips/${trip.id}`);
     }
-    // Tanpa kondisi blokir → Surat Jalan langsung terbit.
-    if (!conditions.length) await issueSuratJalan(trip.id, user.name);
+    // Surat Jalan TIDAK terbit di sini: terbit otomatis sesudah P2H sopir lolos (recordP2H).
     // Sopir langsung dikabari tugas baru lewat bot (setelah respons, supaya papan Dispatch tidak menunggu Telegram).
     after(async () => {
       const { notifyDriverNewTrip } = await import("../bot/driverNotify");

@@ -38,7 +38,7 @@ export default async function LogisticsOverview() {
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <Link href="/modules/logistics/dispatch" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Waiting for dispatch</p><p className="text-2xl font-bold text-slate-800">{waitingDispatch}</p><p className="text-xs text-slate-500">order Confirmed belum dapat truk</p></Link>
-        <Link href="/modules/logistics/trips" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Trips without Surat Jalan</p><p className="text-2xl font-bold text-amber-700">{noSj}</p><p className="text-xs text-slate-500">menunggu override / penerbitan</p></Link>
+        <Link href="/modules/logistics/trips" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Trips without Surat Jalan</p><p className="text-2xl font-bold text-amber-700">{noSj}</p><p className="text-xs text-slate-500">menunggu P2H sopir / override</p></Link>
         <Link href="/modules/logistics/trips" className="rounded-xl border border-slate-200 bg-white p-4 hover:border-blue-300"><p className="text-xs uppercase text-slate-500 font-semibold">Overrides this month</p><p className="text-2xl font-bold text-slate-800">{overridesMonth}</p><p className="text-xs text-slate-500">jejak audit blokir yang dilewati</p></Link>
       </div>
 

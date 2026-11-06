@@ -43,7 +43,7 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
         </div>
         <div className="flex flex-wrap gap-2">
           {trip.suratJalanNo && <DocLinks kind="surat-jalan" id={trip.id} label="Surat Jalan" />}
-          {!trip.isSimulated && <TripActions tripId={trip.id} tripNo={trip.tripNo} canIssue={access.canDispatch && preDeparture && !trip.suratJalanNo && ev.blocked.length === 0 && ev.pending.length === 0} canCancel={access.canDispatch && preDeparture}
+          {!trip.isSimulated && <TripActions tripId={trip.id} tripNo={trip.tripNo} canIssue={access.canDispatch && preDeparture && !trip.suratJalanNo && !!trip.p2hDoneAt && ev.blocked.length === 0 && ev.pending.length === 0} canCancel={access.canDispatch && preDeparture}
             canDelete={access.canDispatch && (["Scheduled", "Cancelled"].includes(trip.status) || (trip.status === "Completed" && access.isSuperAdmin))} />}
         </div>
       </div>
@@ -95,11 +95,11 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
                 <div className="space-y-3">
                   <ul className="text-sm space-y-1">
                     <li className={trip.p2hDoneAt ? "text-emerald-700" : "text-amber-800"}>{trip.p2hDoneAt ? "✅" : "⬜"} P2H sopir {trip.p2hDoneAt ? `lolos · ${fmt(trip.p2hDoneAt)}` : "belum lolos (sopir isi lewat bot)"}</li>
-                    <li className={trip.suratJalanNo ? "text-emerald-700" : "text-amber-800"}>{trip.suratJalanNo ? "✅" : "⬜"} Surat Jalan {trip.suratJalanNo ? `${trip.suratJalanNo} terbit` : "belum terbit (selesaikan override)"}</li>
+                    <li className={trip.suratJalanNo ? "text-emerald-700" : "text-amber-800"}>{trip.suratJalanNo ? "✅" : "⬜"} Surat Jalan {trip.suratJalanNo ? `${trip.suratJalanNo} terbit` : !trip.p2hDoneAt ? "terbit otomatis setelah P2H lolos" : ev.blocked.length ? "diblokir (ganti truk/sopir)" : ev.pending.length ? "menunggu override, lalu Issue Surat Jalan" : "belum terbit — tekan Issue Surat Jalan"}</li>
                   </ul>
                   {trip.p2hDoneAt && trip.suratJalanNo
                     ? (access.canDispatch ? <SjHandoverForm tripId={trip.id} suratJalanNo={trip.suratJalanNo} driverName={trip.driver.name} /> : <p className="text-xs text-slate-500">Menunggu dispatcher mencatat serah terima.</p>)
-                    : <p className="text-xs text-slate-500">Form serah terima muncul setelah P2H lolos dan Surat Jalan terbit. Tombol Berangkat sopir terkunci sampai serah terima dicatat.</p>}
+                    : <p className="text-xs text-slate-500">Urutan: P2H lolos → Surat Jalan terbit → form serah terima muncul di sini. Tombol Berangkat sopir terkunci sampai serah terima dicatat.</p>}
                 </div>
               )}
             </Card>

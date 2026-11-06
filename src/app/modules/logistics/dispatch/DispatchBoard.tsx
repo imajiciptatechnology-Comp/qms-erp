@@ -122,12 +122,12 @@ export default function DispatchBoard({ order, trucks, drivers, helpers, canDisp
       <Card title="Dispatch check (3.5)">
         <div className="space-y-3">
           {!t || !d ? <p className="text-sm text-slate-500">Pilih truk dan sopir.</p> : conds.length === 0 ? (
-            <p className="text-sm text-emerald-700 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Semua syarat terpenuhi — Surat Jalan langsung terbit setelah assign.</p>
+            <p className="text-sm text-emerald-700 flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> Semua syarat terpenuhi — Surat Jalan terbit otomatis setelah P2H sopir lolos.</p>
           ) : (
             <>
               <CondList items={conds} />
               {hard.length > 0 && <p className="text-sm text-red-700">Kombinasi ini <b>tidak bisa</b> di-assign (kondisi keselamatan/hukum).</p>}
-              {!hard.length && <p className="text-sm text-amber-800">Trip dibuat, tapi Surat Jalan baru terbit setelah {soft.length} kondisi di-override oleh role yang berwenang (alasan + tindakan pengendalian{soft.some(c => c.needsEvidence) ? " + bukti" : ""}).</p>}
+              {!hard.length && <p className="text-sm text-amber-800">Trip dibuat, tapi Surat Jalan baru terbit setelah P2H sopir lolos dan {soft.length} kondisi di-override oleh role yang berwenang (alasan + tindakan pengendalian{soft.some(c => c.needsEvidence) ? " + bukti" : ""}).</p>}
             </>
           )}
           {warnings.length > 0 && (

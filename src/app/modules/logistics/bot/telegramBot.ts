@@ -115,7 +115,7 @@ function tripText(c: NonNullable<Ctx>) {
     t.status === "Scheduled" ? [
       "Sebelum berangkat:",
       `${t.p2hDoneAt ? "✅" : "⬜"} 1. P2H${t.p2hDoneAt ? " lolos" : " — tekan 📝 Isi P2H"}`,
-      `${t.events.length ? "✅" : "⬜"} 2. Surat Jalan${t.events.length ? " sudah diambil di kantor" : t.suratJalanNo ? ` ${t.suratJalanNo} — tanda tangan & ambil di kantor` : " — belum terbit (menunggu kantor)"}`,
+      `${t.events.length ? "✅" : "⬜"} 2. Surat Jalan${t.events.length ? " sudah diambil di kantor" : t.suratJalanNo ? ` ${t.suratJalanNo} — tanda tangan & ambil di kantor` : t.p2hDoneAt ? " — belum terbit (menunggu persetujuan kantor)" : " — terbit setelah P2H lolos"}`,
       "⬜ 3. Tekan 🚚 Berangkat",
     ].join("\n") : "",
     t.promisedArrival ? `Janji tiba ke klien: ${time(t.promisedArrival)}` : "",
@@ -470,10 +470,11 @@ async function finishP2H(c: NonNullable<Ctx>, chatId: string, flow: P2HFlowState
     return reply(chatId, ctx, `${list}\n\n⛔ Item kritis bermasalah (${res.critical!.join(", ")}). Truk TIDAK BOLEH berangkat. Fleet Manager sudah diberi tahu; tunggu arahan.`);
   }
   if (res.fails.length) await notifyPermission("logistics_fleet", [`P2H ${plate} (${c.driver.name}): item non-kritis bermasalah — ${detailText(res.fails)}. Perlu override Fleet sebelum berangkat.`], `/modules/logistics/trips/${flow.tripId}`);
+  if (res.suratJalanNo && !res.fails.length) await notifyPermission("logistics_dispatch", [`P2H ${plate} (${c.driver.name}) lolos — Surat Jalan ${res.suratJalanNo} terbit otomatis. Siapkan serah terima di kantor.`], `/modules/logistics/trips/${flow.tripId}`);
   const fresh = (await loadContext(chatId))!;
   return reply(chatId, ctx, res.fails.length
     ? `${list}\n\n⚠️ Item non-kritis bermasalah (${res.fails.join(", ")}). Fleet Manager sudah diberi tahu; tunggu persetujuan (override) sebelum berangkat.`
-    : `${list}\n\n✅ P2H lolos. ${fresh.trip?.events.length ? "Surat Jalan sudah diambil — silakan berangkat." : fresh.trip?.suratJalanNo ? "Langkah berikut: datang ke kantor, tanda tangan & ambil Surat Jalan. Setelah itu tekan 🚚 Berangkat." : "Tunggu Surat Jalan terbit, lalu ambil di kantor sebelum berangkat."}`, { inline: await tripButtons(fresh) });
+    : `${list}\n\n✅ P2H lolos. ${fresh.trip?.events.length ? "Surat Jalan sudah diambil — silakan berangkat." : fresh.trip?.suratJalanNo ? `📄 Surat Jalan ${fresh.trip.suratJalanNo} sudah terbit. Langkah berikut: datang ke kantor, tanda tangan & ambil Surat Jalan. Setelah itu tekan 🚚 Berangkat.` : "Surat Jalan belum bisa terbit — menunggu persetujuan kantor. Bot akan mengabari begitu terbit."}`, { inline: await tripButtons(fresh) });
 }
 
 async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string, source: "text" | "voice") {

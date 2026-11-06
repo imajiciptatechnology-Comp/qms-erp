@@ -47,10 +47,9 @@ export async function notifyDriverNewTrip(tripId: string, by: string): Promise<b
     t.order?.cargoDesc ? `Muatan: ${t.order.cargoDesc}${t.order.cargoWeightTon ? ` (${t.order.cargoWeightTon} ton)` : ""}` : null,
     t.helper ? `Kenek: ${t.helper.name}` : null,
     `Berangkat dari pool: ${wib(t.plannedStart)}`,
-    t.suratJalanNo ? `📄 Surat Jalan ${t.suratJalanNo} sudah terbit.` : `📄 Surat Jalan menyusul (menunggu persetujuan kantor) — bot akan mengabari.`,
     ``,
     `Langkah sebelum berangkat:`,
-    `1️⃣ Isi P2H — tekan 📝 Isi P2H di bawah.`,
+    `1️⃣ Isi P2H — tekan 📝 Isi P2H di bawah. Surat Jalan terbit setelah P2H lolos.`,
     `2️⃣ Datang ke kantor: tanda tangan & ambil Surat Jalan (+ dokumen order, uang jalan).`,
     `3️⃣ Tekan 🚚 Berangkat di 📋 Tugas saya, lalu bagikan 📍 Lokasi Live.`,
     ...navLines,
@@ -61,7 +60,7 @@ export async function notifyDriverNewTrip(tripId: string, by: string): Promise<b
   return sent;
 }
 
-/** Surat Jalan terbit setelah override (atau diterbitkan manual oleh dispatcher). */
+/** Surat Jalan diterbitkan dispatcher (P2H sudah lolos, override selesai). Terbit otomatis saat P2H dikabari lewat finishP2H. */
 export async function notifyDriverSuratJalan(tripId: string, by: string): Promise<boolean> {
   const t = await prisma.trip.findUnique({ where: { id: tripId }, include: { vehicle: true } });
   if (!t?.suratJalanNo || t.status !== "Scheduled") return false;

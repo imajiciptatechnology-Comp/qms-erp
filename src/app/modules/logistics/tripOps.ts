@@ -126,7 +126,10 @@ export async function recordP2H(tripId: string, result: P2HResult, notes: string
     // Odometer hanya naik (salah ketik lebih kecil diabaikan) — dipakai aturan servis overdue (#6/#10).
     ...(odometerKm != null && odometerKm > current.vehicle.odometerKm ? [prisma.vehicle.update({ where: { id: current.vehicleId }, data: { odometerKm } })] : []),
   ]);
-  return { status: passed ? ("passed" as const) : ("failed" as const), unknown: [] as string[], fails: fails.map(i => i.label), critical: critical.map(i => i.label), other: other.map(i => i.label) };
+  // Surat Jalan terbit SESUDAH P2H lolos — otomatis bila tidak ada kondisi blokir/override yang tertunda.
+  // Kalau masih tertunda (mis. item non-kritis #7), dispatcher menerbitkan lewat Issue Surat Jalan setelah override.
+  const suratJalanNo = passed ? await tryIssueSuratJalan(tripId, SJ_AUTO_BY) : null;
+  return { status: passed ? ("passed" as const) : ("failed" as const), unknown: [] as string[], fails: fails.map(i => i.label), critical: critical.map(i => i.label), other: other.map(i => i.label), suratJalanNo };
 }
 
 // ---------------------------------------------------------
@@ -257,7 +260,8 @@ async function nextSuratJalanNo(tx: Tx) {
 
 /**
  * Buat trip. mode "dispatch": kondisi yang bisa di-override boleh tertunda (diselesaikan di halaman trip oleh role yang berwenang).
- * mode "demo" (trip live/simulator): hanya boleh bila bersih, lalu Surat Jalan langsung terbit.
+ * mode "demo" (trip live/simulator): hanya boleh bila bersih.
+ * Surat Jalan TIDAK terbit di sini: terbit sesudah P2H sopir lolos (lihat recordP2H / issueSuratJalan).
  * Kondisi yang tidak bisa di-override selalu menolak.
  */
 export async function createTrip(input: TripInput, by: string, opts: { mode: "dispatch" | "demo"; dutyAck?: boolean }) {
@@ -333,15 +337,18 @@ export async function createTrip(input: TripInput, by: string, opts: { mode: "di
     throw new Error(`${what} baru saja di-assign ke ${winner.tripNo} oleh dispatcher lain. Pilih unit lain.`);
   }
   await prisma.tripEvent.create({ data: { tripId: trip.id, status: "Scheduled", label: `Truk ${vehicle.plateNo} + ${driver.name} di-assign oleh ${by}${warnings.length ? ` (peringatan jam kerja dibaca: ${warnings.length})` : ""}`, at: now, source: "Kantor", by } });
-  if (opts.mode === "demo") await issueSuratJalan(trip.id, by);
   return { trip, vehicle, driver, route, order, stopNames, conditions, warnings };
 }
 
-/** Terbitkan Surat Jalan: hanya bila tidak ada kondisi blokir yang belum di-override. */
+/** Penerbit otomatis Surat Jalan (dicatat di suratJalanBy & timeline) saat P2H lolos. */
+export const SJ_AUTO_BY = "Sistem (P2H lolos)";
+
+/** Terbitkan Surat Jalan: hanya sesudah P2H sopir lolos dan tidak ada kondisi blokir yang belum di-override. */
 export async function issueSuratJalan(tripId: string, by: string) {
   const ev = await evaluateTrip(tripId);
   if (ev.trip.suratJalanNo) return ev.trip.suratJalanNo;
   if (!["Scheduled"].includes(ev.trip.status)) throw new Error("Surat Jalan hanya untuk trip yang belum berangkat.");
+  if (!ev.trip.p2hDoneAt) throw new Error("P2H sopir belum lolos. Surat Jalan terbit setelah sopir lolos P2H di bot.");
   if (ev.blocked.length) throw new Error(`Diblokir (tidak bisa di-override): ${ev.blocked.map(c => c.text).join("; ")}.`);
   if (ev.pending.length) throw new Error(`Masih perlu override: ${ev.pending.map(c => `${c.text} (${c.level})`).join("; ")}.`);
   // suratJalanNo tidak @unique di DB: nomor dibaca & ditulis di bawah satu advisory lock,
@@ -356,6 +363,14 @@ export async function issueSuratJalan(tripId: string, by: string) {
     await tx.tripEvent.create({ data: { tripId, status: "SJ", label: `Surat Jalan ${no} diterbitkan${ev.items.length ? ` (${ev.items.length} kondisi di-override)` : ""}`, at: now, source: "Kantor", by } });
     return no;
   });
+}
+
+/** Terbitkan Surat Jalan bila semua syarat terpenuhi; null (tanpa error) bila belum. */
+export async function tryIssueSuratJalan(tripId: string, by: string): Promise<string | null> {
+  const ev = await evaluateTrip(tripId);
+  if (ev.trip.suratJalanNo) return ev.trip.suratJalanNo;
+  if (ev.trip.status !== "Scheduled" || !ev.trip.p2hDoneAt || ev.blocked.length || ev.pending.length) return null;
+  return issueSuratJalan(tripId, by).catch(err => { console.error("[logistics] auto-issue SJ", err); return null; });
 }
 
 /** Kompatibel dengan pemanggil lama (trip live dari Fleet Tracking / Driver simulator). */
