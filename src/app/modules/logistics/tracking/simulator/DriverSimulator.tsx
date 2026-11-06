@@ -60,7 +60,8 @@ export default function DriverSimulator({ drivers, vehicles, orders, routes }: {
   });
 
   // Tombol hanya aktif di pesan bot terakhir yang punya tombol (seperti status trip terkini).
-  const lastButtons = [...messages].reverse().find(m => m.direction === "out" && m.buttons.length > 0)?.id;
+  // Pesan terakhir dengan tombol aksi (tombol link di pin lokasi tidak menonaktifkan tombol tugas).
+  const lastButtons = [...messages].reverse().find(m => m.direction === "out" && m.buttons.some(row => row.some(b => b.callback_data)))?.id;
   const mapUnits = unit && unit.lat != null ? [{ id: unit.id, plateNo: unit.plateNo, status: unit.status, lat: unit.lat, lng: unit.lng, path: unit.path, popupHtml: unit.plateNo }] : [];
 
   return (
@@ -120,7 +121,9 @@ export default function DriverSimulator({ drivers, vehicles, orders, routes }: {
                     {/* Satu baris tombol = satu baris di Telegram (checklist P2H tampil 2 kolom). */}
                     {m.buttons.map((row, ri) => (
                       <div key={ri} className="flex gap-1">
-                        {row.map(b => (
+                        {row.map(b => b.url ? (
+                          <a key={b.url} href={b.url} target="_blank" rel="noreferrer" className="flex-1 min-w-0 rounded-lg bg-white/80 hover:bg-white text-[#3a6d99] text-[13px] font-medium py-1.5 px-1 truncate text-center">{b.text}</a>
+                        ) : (
                           <button key={b.callback_data ?? b.text} type="button" disabled={busy || m.id !== lastButtons && !b.callback_data?.startsWith("task")}
                             onClick={() => b.callback_data && send({ type: "button", data: b.callback_data })}
                             className="flex-1 min-w-0 rounded-lg bg-white/80 hover:bg-white text-[#3a6d99] text-[13px] font-medium py-1.5 px-1 truncate disabled:opacity-40">{b.text}</button>

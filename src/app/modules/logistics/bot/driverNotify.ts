@@ -3,10 +3,9 @@
 // tombol itu tetap bekerja seperti biasa. Bukan "use server" — hanya dipanggil dari kode server.
 import { prisma } from "@/lib/prisma";
 import type { InlineButton } from "@/lib/telegram";
-import { closeTripChat, sendToDriver } from "./telegramBot";
+import { closeTripChat, sendPlacesToDriver, sendToDriver } from "./telegramBot";
 
 export { closeTripChat };
-import { gmapsDirections, parsePlan } from "../trackingLib";
 
 const wib = (iso: string | null | undefined, withDay = true) =>
   iso ? new Date(iso).toLocaleString("id-ID", { ...(withDay ? { weekday: "short", day: "2-digit", month: "short" } : {}), hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) : "-";
@@ -26,15 +25,6 @@ export async function notifyDriverNewTrip(tripId: string, by: string): Promise<b
     include: { vehicle: { include: { truckType: true } }, route: true, client: true, helper: true, order: { include: { stops: { orderBy: { seq: "asc" } } } } },
   });
   if (!t || t.status !== "Scheduled") return false;
-  const plan = parsePlan(t.planJson);
-  const load = plan.phases.find(p => p.status === "Loading")?.path[0];
-  const drops = plan.phases.filter(p => p.status === "Unloading");
-  const navLines = [
-    load || drops.length ? `` : null,
-    load || drops.length ? `🗺️ Navigasi Google Maps:` : null,
-    load ? `Muat: ${gmapsDirections(load[0], load[1])}` : null,
-    ...drops.map((p, i) => `Bongkar ${i + 1}: ${gmapsDirections(p.path[0][0], p.path[0][1])}`),
-  ];
   const stops = t.order?.stops.map((s, i) => `   ${i + 1}. ${s.name}${s.city ? `, ${s.city}` : ""}`).join("\n") ?? `   1. ${t.route?.destination ?? "-"}`;
   const text = [
     `🆕 TUGAS BARU dari kantor (${by})`,
@@ -52,10 +42,12 @@ export async function notifyDriverNewTrip(tripId: string, by: string): Promise<b
     `1️⃣ Isi P2H — tekan 📝 Isi P2H di bawah. Surat Jalan terbit setelah P2H lolos.`,
     `2️⃣ Datang ke kantor: tanda tangan & ambil Surat Jalan (+ dokumen order, uang jalan).`,
     `3️⃣ Tekan 🚚 Berangkat di 📋 Tugas saya, lalu bagikan 📍 Lokasi Live.`,
-    ...navLines,
+    `📍 Lokasi tiap titik muat & bongkar dikirim di bawah — tekan pin untuk peta, 🧭 Petunjuk arah untuk navigasi.`,
   ].filter(l => l !== null).join("\n");
   const inline: InlineButton[][] = [[{ text: "📝 Isi P2H", callback_data: `p2hstart:${t.id}` }], [{ text: "📋 Lihat tugas", callback_data: "task" }]];
   const sent = await sendToDriver(t.driverId, text, { sentBy: by, tripId: t.id, inline }).catch(() => false);
+  // Pin lokasi per titik (seperti share location), sesudah pesan tugas.
+  if (sent) await sendPlacesToDriver(t.driverId, t.id, by).catch(err => console.error("[notify] places", err));
   await noteOnTrip(t.id, sent, "Tugas baru", by);
   return sent;
 }

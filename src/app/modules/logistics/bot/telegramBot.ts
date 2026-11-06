@@ -5,7 +5,7 @@ import { AiError, aiTranscribeAudio, isAiConfigured } from "@/lib/ai";
 import { downloadFile as tgDownload, sendMessage as tgSend, tg as tgApi, type InlineButton } from "@/lib/telegram";
 import { uploadToStorage } from "@/lib/uploadFile";
 import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES } from "../lib";
-import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, haversineKm } from "../trackingLib";
+import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, gmapsDirections, haversineKm, parsePlan } from "../trackingLib";
 import { notifyPermission } from "../fleetDocs";
 import { consumeDailyQuota } from "../dbUtil";
 import { scanFleetDocument } from "../ai/scanFleetDoc";
@@ -68,6 +68,16 @@ async function log(data: { chatId: string; driverId?: string | null; tripId?: st
   return row?.id ?? null;
 }
 
+/** Notifikasi kantor (lonceng) untuk setiap pesan sopir: teks, voice, foto, file. Tombol, P2H & lokasi tidak. */
+async function notifyChatIn(c: NonNullable<Ctx>, kind: "text" | "voice" | "photo" | "file", text: string | null) {
+  const icon = { text: "💬", voice: "🎤", photo: "📷", file: "📎" }[kind];
+  const body = (text ?? "").replace(/\s+/g, " ").trim();
+  const what = kind === "photo" ? `Foto${body ? `: ${body}` : ""}` : kind === "voice" ? `Voice: ${body}` : body;
+  const where = c.trip ? ` (${c.trip.vehicle.plateNo} · ${c.trip.tripNo})` : "";
+  await notifyPermission("logistics_dispatch", [`${icon} Chat baru dari ${c.driver.name}${where}: ${what.length > 140 ? `${what.slice(0, 140)}…` : what}`],
+    c.trip ? `/modules/logistics/trips/${c.trip.id}` : `/modules/logistics/fleet/drivers/${c.driver.id}`).catch(err => console.error("[bot] notify chat", err));
+}
+
 /** Kirim + catat. Mengembalikan id log & message_id Telegram (untuk mengubah tombol pesan ini nanti). */
 async function reply(chatId: string, ctx: { driverId?: string; tripId?: string | null }, text: string, opts: { inline?: InlineButton[][]; keyboard?: unknown } = {}) {
   const sent = await sendMessage(chatId, text, opts.inline?.length === 0 ? { ...opts, inline: undefined } : opts);
@@ -128,7 +138,65 @@ async function tripButtons(c: NonNullable<Ctx>): Promise<InlineButton[][]> {
   const actions = nextActions(t, await stopsTotalOf(t.id));
   const rows: InlineButton[][] = actions.map(a => [{ text: a.label, callback_data: `st:${t.id}:${a.to}` }]);
   if (t.status === "Scheduled" && !t.p2hDoneAt) rows.unshift([{ text: "📝 Isi P2H", callback_data: `p2hstart:${t.id}` }]);
+  if (t.status !== "Returning") rows.push([{ text: "📍 Lokasi titik muat & bongkar", callback_data: `places:${t.id}` }]);
   return rows;
+}
+
+// ---------------------------------------------------------
+// Lokasi per titik: pin peta (Telegram sendVenue) + tombol petunjuk arah Google Maps
+// ---------------------------------------------------------
+
+export type TripPlace = { title: string; address: string; lat: number; lng: number };
+
+/**
+ * Titik muat & bongkar trip (koordinat dari rencana rute). `remainingOnly`: hanya titik yang belum dilewati
+ * (muat hanya sebelum tiba di lokasi muat; bongkar mulai dari titik yang belum selesai).
+ */
+export async function tripPlaces(tripId: string, remainingOnly = false): Promise<TripPlace[]> {
+  const t = await prisma.trip.findUnique({ where: { id: tripId }, include: { route: true, order: { include: { stops: { orderBy: { seq: "asc" } } } } } });
+  if (!t) return [];
+  const plan = parsePlan(t.planJson);
+  const load = plan.phases.find(p => p.status === "Loading")?.path[0];
+  const drops = plan.phases.filter(p => p.status === "Unloading").map(p => p.path[0]).filter(Boolean);
+  const stops = t.order?.stops ?? [];
+  const places: TripPlace[] = [];
+  const loadDone = !["Scheduled", "ToLoad"].includes(t.status);
+  if (load && !(remainingOnly && loadDone)) {
+    places.push({ title: `📦 Muat: ${t.order?.originName ?? t.route?.origin ?? "Lokasi muat"}`, address: t.order?.originAddress || t.route?.origin || "Lokasi muat", lat: load[0], lng: load[1] });
+  }
+  drops.forEach((d, i) => {
+    if (remainingOnly && i < t.stopsDone) return;
+    const s = stops[i];
+    places.push({
+      title: `🏁 Bongkar ${i + 1}${drops.length > 1 ? `/${drops.length}` : ""}: ${s?.name ?? t.route?.destination ?? "Titik bongkar"}`,
+      address: [s?.address, s?.city].filter(Boolean).join(", ") || s?.name || t.route?.destination || "Titik bongkar",
+      lat: d[0], lng: d[1],
+    });
+  });
+  return places;
+}
+
+/** Kirim pin lokasi per titik ke satu chat. Simulator: dicatat saja (kind "location", tombol url). */
+async function sendPlaces(chatId: string, ctx: { driverId: string; tripId: string | null }, places: TripPlace[], sentBy: string) {
+  for (const p of places) {
+    const inline: InlineButton[][] = [[{ text: "🧭 Petunjuk arah (Google Maps)", url: gmapsDirections(p.lat, p.lng) }]];
+    if (!isSimChat(chatId)) {
+      await tgApi("sendVenue", { chat_id: chatId, latitude: p.lat, longitude: p.lng, title: p.title.slice(0, 120), address: p.address.slice(0, 200), reply_markup: { inline_keyboard: inline } });
+    }
+    await log({ chatId, driverId: ctx.driverId, tripId: ctx.tripId, direction: "out", kind: "location", text: `${p.title}\n${p.address}`, sentBy, aiJson: JSON.stringify({ buttons: inline, lat: p.lat, lng: p.lng }) });
+  }
+}
+
+/** Kirim pin lokasi titik trip ke semua chat sopir yang terhubung. */
+export async function sendPlacesToDriver(driverId: string, tripId: string, sentBy: string, remainingOnly = false): Promise<boolean> {
+  const places = await tripPlaces(tripId, remainingOnly);
+  if (!places.length) return false;
+  const links = await prisma.chatChannelLink.findMany({ where: { driverId, active: true, chatId: { not: null } } });
+  let sent = false;
+  for (const link of links) {
+    try { await sendPlaces(link.chatId!, { driverId, tripId }, places, sentBy); sent = true; } catch (err) { console.error("[bot] sendPlaces", err); }
+  }
+  return sent;
 }
 
 /** Data untuk AI: hanya milik sopir ini. */
@@ -201,6 +269,7 @@ export async function handleTelegramUpdate(update: TgUpdate, via: "telegram" | "
   }
   if (m.document) {
     await log({ chatId, ...ctx, direction: "in", kind: "text", text: `[file] ${m.document.file_name ?? ""}` });
+    await notifyChatIn(c, "file", m.document.file_name ?? "File");
     return reply(chatId, ctx, "Untuk foto dokumen, kirim sebagai Foto (bukan File) supaya bisa dibaca otomatis.");
   }
   const text = (m.text ?? "").trim();
@@ -209,6 +278,7 @@ export async function handleTelegramUpdate(update: TgUpdate, via: "telegram" | "
   if (text === "📋 Tugas saya" || text === "/tugas") return reply(chatId, ctx, tripText(c), { inline: await tripButtons(c) });
   if (text === "✅ P2H" || text === "/p2h") return startP2H(c, chatId);
   if (text === "❓ Bantuan" || text === "/help" || text === "/start") return reply(chatId, ctx, HELP, { keyboard: MAIN_KEYBOARD });
+  await notifyChatIn(c, "text", text);
   return handleFreeText(c, chatId, text, "text");
 }
 
@@ -247,6 +317,14 @@ async function handleCallback(c: NonNullable<Ctx>, chatId: string, cbId: string,
   const [kind, tripId, to] = data.split(":");
   if (kind === "task") { await answer(); return reply(chatId, ctx, tripText(c), { inline: await tripButtons(c) }); }
   if (!c.trip || c.trip.id !== tripId) { await answer("Trip ini sudah tidak aktif."); return; }
+  if (kind === "places") {
+    await answer();
+    await log({ chatId, ...ctx, direction: "in", kind: "button", text: "📍 Lokasi titik" });
+    const places = await tripPlaces(c.trip.id, true);
+    if (!places.length) return reply(chatId, ctx, "Koordinat titik untuk trip ini belum ada. Tanyakan alamat ke dispatcher.");
+    await reply(chatId, ctx, `📍 ${places.length} titik ${c.trip.tripNo}. Tekan pin untuk membuka peta, atau 🧭 Petunjuk arah untuk navigasi.`);
+    return sendPlaces(chatId, { driverId: c.driver.id, tripId: c.trip.id }, places, "Bot");
+  }
   // P2H: hanya sebelum berangkat. Tombol "semua OK" lama (p2hok) tidak dipakai lagi — P2H wajib per item.
   if (kind === "p2hok" || kind === "p2hstart" || kind === "pc" || kind === "pd") {
     if (c.trip.status !== "Scheduled") { await answer(); return reply(chatId, ctx, "Trip sudah berjalan, jadi P2H tidak diubah lagi.", { inline: await tripButtons(c) }); }
@@ -517,6 +595,7 @@ async function handleVoice(c: NonNullable<Ctx>, chatId: string, fileId: string, 
     await reply(chatId, ctx, `🎤 Saya dengar: "${text.slice(0, 500)}"`);
     const flow = getState(c);
     if (isP2HFlow(flow) && c.trip?.id === flow.tripId && c.trip.status === "Scheduled") return handleP2HInput(c, chatId, text, flow);
+    await notifyChatIn(c, "voice", text);
     return handleFreeText(c, chatId, text, "voice");
   } catch (err) {
     console.error("[bot] voice", err);
@@ -534,6 +613,7 @@ async function handlePhoto(c: NonNullable<Ctx>, chatId: string, m: TgMessage) {
     fileUrl = photo.file_id.startsWith("url:") ? photo.file_id.slice(4)
       : await uploadToStorage(`logistics/telegram/${c.driver.id}`, new File([new Uint8Array(bytes)], `tg-${Date.now()}.jpg`, { type: "image/jpeg" }));
     await log({ chatId, ...ctx, direction: "in", kind: "photo", text: m.caption ?? null, fileUrl });
+    await notifyChatIn(c, "photo", m.caption ?? null);
     if (!isAiConfigured() || !(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "📷 Foto diterima dan disimpan. Terima kasih, Pak.");
     await chatAction(chatId).catch(() => {});
     const dataUrl = `data:image/jpeg;base64,${bytes.toString("base64")}`;

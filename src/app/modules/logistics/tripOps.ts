@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { prisma } from "@/lib/prisma";
 import { today } from "./lib";
 import { withLock, type Tx } from "./dbUtil";
+import { notifyPermission } from "./fleetDocs";
 import { P2H_ITEMS, p2hNotesText, parseP2HRecord, type P2HDetail, type P2HResult } from "./p2hLib";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, firstUnloadMin, parsePlan } from "./trackingLib";
 import { buildPlan } from "./tracking";
@@ -67,7 +68,22 @@ export async function applyTripStatus(tripId: string, to: string, by: string, so
   });
   if (!applied) throw new Error("Status trip baru saja berubah (tombol ditekan dua kali?). Buka 📋 Tugas saya untuk tombol terbaru.");
   if (to === "Completed") await afterTripCompleted(tripId);
+  await notifyProgress(tripId, to, label, by, source).catch(err => console.error("[logistics] notify progress", err));
   return label;
+}
+
+const PROGRESS_ICON: Record<string, string> = { ToLoad: "🚚", Loading: "📦", InTransit: "🛣️", Unloading: "🏁", Returning: "✅", Completed: "🏠" };
+
+/** Notifikasi kantor (lonceng) untuk setiap progres trip: berangkat, tiba muat, kirim, tiba/selesai bongkar, tiba di pool. */
+async function notifyProgress(tripId: string, to: string, label: string, by: string, source: "Telegram" | "Kantor") {
+  const t = await prisma.trip.findUniqueOrThrow({ where: { id: tripId }, select: {
+    tripNo: true, stopsDone: true, vehicle: { select: { plateNo: true } }, driver: { select: { name: true } },
+    client: { select: { name: true } }, order: { select: { stops: { orderBy: { seq: "asc" }, select: { name: true } } } },
+  } });
+  // Tiba di titik bongkar: sebut nama titiknya (stopsDone = jumlah titik yang sudah selesai).
+  const stop = to === "Unloading" ? t.order?.stops[t.stopsDone]?.name : null;
+  const who = source === "Kantor" ? ` (dicatat kantor: ${by})` : "";
+  await notifyPermission("logistics_dispatch", [`${PROGRESS_ICON[to] ?? "•"} ${t.tripNo} · ${t.vehicle.plateNo} · ${t.driver.name}${t.client ? ` · ${t.client.name}` : ""}: ${label}${stop ? ` — ${stop}` : ""}${who}`], `/modules/logistics/trips/${tripId}`);
 }
 
 /** Sesudah trip: maintenance request otomatis untuk kondisi kendaraan yang di-override (3.5), order → Completed. */

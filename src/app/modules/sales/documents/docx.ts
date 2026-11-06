@@ -79,7 +79,8 @@ function footer(number: string) {
 function cellParas(c: Cell, a?: string): Paragraph[] {
   const v = typeof c === "string" ? { text: c } : c;
   return [
-    para([run(v.text, { bold: v.bold })], { align: alignOf(a), after: 0 }),
+    // Baris baru di teks sel = paragraf baru (mis. ruang kosong untuk tanda tangan).
+    ...v.text.split("\n").map(line => para([run(line, { bold: v.bold })], { align: alignOf(a), after: 0 })),
     ...(v.sub ? [para([run(v.sub, { size: 15, color: C.muted })], { align: alignOf(a), after: 0 })] : []),
     ...(v.note ? [para([run(v.note, { size: 14, color: "B45309" })], { align: alignOf(a), after: 0 })] : []),
   ];

@@ -62,13 +62,22 @@ async function charterQuote(id: string): Promise<DocModel | null> {
 async function suratJalan(id: string): Promise<DocModel | null> {
   const t = await prisma.trip.findUnique({
     where: { id },
-    include: { vehicle: { include: { truckType: true } }, driver: true, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } }, overrides: true },
+    include: { vehicle: { include: { truckType: true } }, driver: true, helper: true, route: true, client: true, order: { include: { stops: { orderBy: { seq: "asc" } } } }, overrides: true,
+      events: { where: { status: "SJHandover" }, orderBy: { at: "desc" }, take: 1, select: { by: true } } },
   });
   if (!t || !t.suratJalanNo) return null;
   const { brand, city, signers } = await getLogisticsBrand();
   const o = t.order;
   const date = (t.suratJalanAt ?? t.createdAt).slice(0, 10);
   const stops = o?.stops ?? [];
+  // Multi-drop: satu Surat Jalan, tapi tiap titik bongkar punya baris tanda terima sendiri.
+  const multiDrop = stops.length > 1;
+  // Penanda tangan kantor = petugas yang menyerahkan SJ ke sopir; SJ yang terbit otomatis (P2H lolos) tidak punya nama orang.
+  const issuer = t.events[0]?.by ?? (t.suratJalanBy && !t.suratJalanBy.startsWith("Sistem") ? t.suratJalanBy : null) ?? signers.find(s => s.key === "fleet")?.name ?? "(.................................)";
+  const office = [
+    { lead: "Dikeluarkan oleh,", org: brand.company, name: issuer, title: "Dispatcher" },
+    { lead: "Pengemudi,", name: t.driver.name, title: `Sopir · ${t.vehicle.plateNo}` },
+  ];
   return {
     brand,
     fileName: safeName(`Surat Jalan ${t.suratJalanNo} ${t.vehicle.plateNo}`),
@@ -86,19 +95,25 @@ async function suratJalan(id: string): Promise<DocModel | null> {
       { type: "kv", title: "Rute & jadwal", rows: [
         ["Rute", t.route ? `${t.route.origin} → ${t.route.destination} (±${t.route.distanceKm} km)` : "-"],
         ["Muat", o ? `${o.originName}${o.originAddress ? `, ${o.originAddress}` : ""} · ${tanggal(o.loadDate)}${o.loadTime ? ` pukul ${o.loadTime}` : ""}` : "-"],
-        ["Titik bongkar", stops.map(s => `${s.seq}. ${s.name}`).join("; ") || "-"],
+        // Multi-drop: titik bongkar sudah ada di tabel tanda terima.
+        ...(multiDrop ? [] : [["Titik bongkar", stops.map(s => `${s.seq}. ${s.name}`).join("; ") || "-"] as [string, string]]),
       ] },
       { type: "table", columns: [{ label: "No", width: 0.5, align: "center" }, { label: "Uraian muatan", width: 4 }, { label: "Berat", width: 1.2, align: "right" }, { label: "Jumlah diterima", width: 1.6, align: "center" }, { label: "Catatan", width: 1.8 }],
         rows: [["1", { text: o?.cargoDesc ?? "-", sub: o?.cargoValue ? `Nilai barang ${rupiah(o.cargoValue)}` : null }, o?.cargoWeightTon ? `${o.cargoWeightTon} ton` : "-", "", ""]] },
       { type: "kv", title: "Segel", rows: [["No. segel", "........................................ (diisi saat muat)"], ["Kondisi segel saat bongkar", "Utuh / Rusak *coret salah satu"]] },
       ...(t.overrides.length ? [{ type: "note" as const, text: `Catatan dispatch: trip ini berjalan dengan ${t.overrides.length} override (${t.overrides.map(x => `#${x.condition.split(":")[0]} oleh ${x.byName}`).join(", ")}). Detail tercatat di sistem.` }] : []),
-      { type: "note", text: "Barang diterima dalam keadaan baik dan jumlah sesuai, kecuali dicatat di kolom catatan. Selisih/kerusakan wajib ditulis sebelum tanda tangan." },
+      // Multi-drop: tanda tangan kantor & sopir di atas, lalu tabel tanda terima (bisa berlanjut ke halaman 2).
+      ...(multiDrop ? [
+        { type: "signatures" as const, items: office },
+        { type: "heading" as const, text: `Tanda terima per titik bongkar (${stops.length} titik) — tiap penerima menandatangani barisnya sendiri` },
+        { type: "table" as const,
+          columns: [{ label: "No", width: 0.5, align: "center" as const }, { label: "Titik bongkar", width: 2.6 }, { label: "Jumlah diterima", width: 1.3, align: "center" as const }, { label: "Tiba (tgl/jam)", width: 1.3, align: "center" as const }, { label: "Nama, tanda tangan & stempel penerima", width: 2.6 }, { label: "Catatan selisih / kerusakan", width: 1.4 }],
+          rows: stops.map(s => [String(s.seq), { text: s.name, sub: [s.address, s.city].filter(Boolean).join(", ") || null }, "", "", { text: "\n\n", sub: "Nama: ................................" }, ""]) },
+      ] : [
+        { type: "note" as const, text: "Barang diterima dalam keadaan baik dan jumlah sesuai, kecuali dicatat di kolom catatan. Selisih/kerusakan wajib ditulis sebelum tanda tangan." },
+      ]),
     ],
-    signatures: [
-      { lead: "Dikeluarkan oleh,", org: brand.company, name: t.suratJalanBy ?? signers.find(s => s.key === "fleet")?.name ?? "", title: "Dispatcher" },
-      { lead: "Pengemudi,", name: t.driver.name, title: `Sopir · ${t.vehicle.plateNo}` },
-      { lead: "Diterima oleh,", name: "(.................................)", title: "Nama, tanda tangan & stempel penerima" },
-    ],
+    signatures: multiDrop ? undefined : [...office, { lead: "Diterima oleh,", name: "(.................................)", title: "Nama, tanda tangan & stempel penerima" }],
   };
 }
 

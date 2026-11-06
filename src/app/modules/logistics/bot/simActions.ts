@@ -104,7 +104,7 @@ export async function simLiveTick(driverId: string) {
   } catch (err) { return fail(err); }
 }
 
-export type SimMessage = { id: string; direction: string; kind: string; text: string | null; fileUrl: string | null; at: string; buttons: { text: string; callback_data?: string }[][] };
+export type SimMessage = { id: string; direction: string; kind: string; text: string | null; fileUrl: string | null; at: string; buttons: { text: string; callback_data?: string; url?: string }[][] };
 
 export async function simFeed(driverId: string): Promise<{ ok: true; messages: SimMessage[] } | { ok: false; error: string }> {
   try {
