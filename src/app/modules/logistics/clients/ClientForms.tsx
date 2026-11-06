@@ -68,10 +68,12 @@ export function LocationForm({ clientId, initial }: { clientId: string; initial?
         <F label="Jenis"><select name="kind" defaultValue={l?.kind ?? "Muat"} className={inputCls}><option>Muat</option><option>Bongkar</option></select></F>
         <F label="Kota"><input name="city" required defaultValue={l?.city} className={inputCls} /></F>
         <F label="Alamat" span="md:col-span-2"><input name="address" defaultValue={l?.address ?? ""} className={inputCls} /></F>
+        <F label="Link Google Maps" span="md:col-span-4"><input name="mapsUrl" type="url" inputMode="url" placeholder="https://maps.app.goo.gl/…  atau  https://www.google.com/maps/place/…" className={inputCls} /></F>
         <F label="Latitude"><input name="lat" inputMode="decimal" defaultValue={l?.lat ?? ""} placeholder="-6.2950" className={inputCls} /></F>
         <F label="Longitude"><input name="lng" inputMode="decimal" defaultValue={l?.lng ?? ""} placeholder="107.1380" className={inputCls} /></F>
       </div>
-      <p className="text-xs text-slate-500">Koordinat opsional: di Google Maps klik kanan lokasi → salin angka koordinat. Dipakai untuk titik di peta Fleet Tracking. Nama lokasi muncul sebagai pilihan saat membuat order.</p>
+      <p className="text-xs text-slate-500">Tempel link Google Maps (tombol <b>Bagikan → Salin link</b>) — koordinat diisi otomatis. Atau isi latitude/longitude manual (klik kanan titik di Google Maps → salin koordinat). Koordinat dipakai untuk peta Fleet Tracking, rencana rute, dan link navigasi ke sopir.</p>
+      {l?.lat != null && l?.lng != null && <a href={`https://www.google.com/maps/search/?api=1&query=${l.lat},${l.lng}`} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-700 hover:underline">Lihat koordinat sekarang di Google Maps ↗</a>}
     </Shell>
   );
 }

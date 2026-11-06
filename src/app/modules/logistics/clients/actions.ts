@@ -3,6 +3,7 @@
 // Master klien logistik + lokasi muat/bongkar (CS / Operations Manager).
 import { prisma } from "@/lib/prisma";
 import { guardAccess, runAction } from "../server";
+import { inIndonesia, resolveMapsLink } from "../mapsLink";
 
 const run = (fn: () => Promise<string | void>) => runAction(fn, { uniqueMessage: "Kode klien sudah dipakai." });
 const guard = async () => (await guardAccess(a => a.canOrder || a.canRates, "Hanya Admin Order / Operations Manager yang bisa mengelola klien.")).user;
@@ -49,8 +50,15 @@ export async function saveLocation(fd: FormData) {
     const clientId = req(fd, "clientId", "Klien");
     await prisma.logisticsClient.findUniqueOrThrow({ where: { id: clientId } });
     const kind = str(fd, "kind") === "Bongkar" ? "Bongkar" : "Muat";
-    const lat = coord(fd, "lat", -11.5, 6.5);
-    const lng = coord(fd, "lng", 94, 141.5);
+    // Link Google Maps (bila diisi) mengalahkan isian latitude/longitude manual.
+    const mapsUrl = str(fd, "mapsUrl");
+    let lat = coord(fd, "lat", -11.5, 6.5);
+    let lng = coord(fd, "lng", 94, 141.5);
+    if (mapsUrl) {
+      const pos = await resolveMapsLink(mapsUrl);
+      if (!inIndonesia(pos)) throw new Error(`Koordinat dari link (${pos[0].toFixed(5)}, ${pos[1].toFixed(5)}) di luar Indonesia. Periksa lagi link-nya.`);
+      [lat, lng] = [Math.round(pos[0] * 1e6) / 1e6, Math.round(pos[1] * 1e6) / 1e6];
+    }
     if ((lat == null) !== (lng == null)) throw new Error("Isi latitude dan longitude sekaligus, atau kosongkan keduanya.");
     const data = { clientId, name: req(fd, "name", "Nama lokasi"), kind, address: str(fd, "address"), city: req(fd, "city", "Kota"), lat, lng };
     if (id) {

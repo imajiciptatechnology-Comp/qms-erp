@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { gmapsPoint } from "../trackingLib";
 import { getLogisticsAccess } from "../server";
 import { Card } from "../ui";
 import { ClientForm, LocationForm } from "./ClientForms";
@@ -46,7 +47,7 @@ export default async function ClientsPage() {
                   {c.locations.map(l => (
                     <li key={l.id} className="flex items-center gap-2">
                       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${l.kind === "Muat" ? "bg-blue-50 text-blue-700" : "bg-orange-50 text-orange-700"}`}>{l.kind}</span>
-                      <span className="flex-1 min-w-0">{l.name} <span className="text-xs text-slate-500">· {l.city}{l.lat != null && l.lng != null ? ` (${l.lat.toFixed(3)}, ${l.lng.toFixed(3)})` : " · tanpa koordinat"}</span></span>
+                      <span className="flex-1 min-w-0">{l.name} <span className="text-xs text-slate-500">· {l.city}{l.lat != null && l.lng != null ? <> · <a href={gmapsPoint(l.lat, l.lng)} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">Google Maps ↗</a></> : " · tanpa koordinat"}</span></span>
                       {canEdit && <LocationForm clientId={c.id} initial={{ id: l.id, name: l.name, kind: l.kind, address: l.address, city: l.city, lat: l.lat, lng: l.lng }} />}
                     </li>
                   ))}
