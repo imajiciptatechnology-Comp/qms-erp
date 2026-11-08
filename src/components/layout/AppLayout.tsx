@@ -58,7 +58,8 @@ export default function AppLayout({ children, user, rolesConfig }: { children: R
       <div className="flex-1 min-w-0 lg:ml-64 flex flex-col min-h-screen">
         <Topbar user={user} onMenuToggle={() => setSidebarOpen(v => !v)} />
 
-        <main id="main-content" className="flex-1 p-4 sm:p-6">
+        {/* pb-20: ruang di bawah agar baris terakhir tidak tertutup tombol Assistant yang melayang */}
+        <main id="main-content" className="flex-1 p-4 sm:p-6 pb-20 sm:pb-20">
           {children}
         </main>
       </div>

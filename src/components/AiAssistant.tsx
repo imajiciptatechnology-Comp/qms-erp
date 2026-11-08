@@ -225,10 +225,13 @@ export default function AiAssistant() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="print:hidden fixed bottom-5 right-5 z-40 inline-flex items-center gap-2 pl-3.5 pr-4 py-2.5 rounded-full border border-slate-300 bg-white text-sm font-semibold text-slate-700 shadow-md shadow-slate-900/10 hover:border-blue-400 hover:text-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+          // Bulat & ringkas supaya tidak menutupi isi tabel; teks "Assistant" muncul saat hover / fokus.
+          className="group print:hidden fixed bottom-4 right-4 z-40 inline-flex items-center h-11 min-w-11 px-3 rounded-full bg-blue-600 text-white text-sm font-semibold shadow-lg shadow-blue-900/25 hover:bg-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
           aria-label="Open QMS Assistant"
+          title="QMS Assistant"
         >
-          <MessageSquareText className="w-[18px] h-[18px] text-blue-600" aria-hidden="true" /> Assistant
+          <MessageSquareText className="w-5 h-5 shrink-0" aria-hidden="true" />
+          <span className="max-w-0 overflow-hidden whitespace-nowrap transition-[max-width,margin] duration-200 group-hover:max-w-24 group-hover:ml-2 group-focus-visible:max-w-24 group-focus-visible:ml-2">Assistant</span>
         </button>
       )}
 
