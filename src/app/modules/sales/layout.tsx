@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/app/actions/auth";
 import { getRolesConfig } from "@/lib/authServer";
 import { salesAccess } from "./lib";
 import SalesNav from "./SalesNav";
+import { countPendingApprovals } from "./server";
 
 export default async function SalesLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
@@ -22,9 +23,9 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Sales & Marketing</h1>
-        <p className="text-slate-500 text-sm">Penawaran → PO → Invoice → Kontrak (ISO 9001 Cl. 8.2 Requirements for Products & Services)</p>
+        <p className="text-slate-500 text-sm">Tender & penawaran → PO → invoice & pembayaran · semua persetujuan di Dashboard Persetujuan (ISO 9001 Cl. 8.2)</p>
       </div>
-      <SalesNav />
+      <SalesNav pendingApprovals={access.canApprove ? await countPendingApprovals() : 0} />
       {children}
     </div>
   );

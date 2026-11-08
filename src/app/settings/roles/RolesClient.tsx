@@ -10,7 +10,7 @@ const SPECIAL_PRIVILEGES = [
   { id: "document_approve", label: "Can Approve Documents" },
   { id: "audit_manage", label: "Can Manage Audits" },
   { id: "sales_manage", label: "Can Create Quotations & Sales Orders" },
-  { id: "sales_approve", label: "Can Approve Sales Discounts & Orders" },
+  { id: "sales_approve", label: "Can Approve Discounts, Contracts, Special Shipments & Training Schedules" },
   { id: "finance", label: "Can Manage Invoices & Payments" },
   ...LOG_PRIVILEGES,
 ];

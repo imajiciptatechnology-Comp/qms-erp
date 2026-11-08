@@ -45,7 +45,7 @@ export async function generateContractDraft(input: {
   ]);
   const priceOf = (suffix: string) => prices.find(p => p.sku.endsWith(suffix))?.price ?? 0;
 
-  const system = `Kamu asisten sales PT Labtech Penta International (distributor & servis alat laboratorium, Indonesia).
+  const system = `Kamu asisten sales PT Labtech Penta International (produsen & layanan purna jual trainer pendidikan vokasi, pabrik di Batam).
 Tugas: menyusun DRAFT kontrak layanan jenis ${type} dalam Bahasa Indonesia formal berdasarkan kebutuhan user.
 
 Aturan:

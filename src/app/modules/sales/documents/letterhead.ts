@@ -4,7 +4,7 @@
  */
 export const LETTERHEAD = {
   company: "PT LABTECH PENTA INTERNATIONAL",
-  tagline: "Laboratory Equipment · Installation · Calibration · Service",
+  tagline: "Technical & Vocational Training Equipment · Manufacturing · Installation · Training",
   address: "Gedung Contoh Lt. 5, Jl. Placeholder Raya No. 10, Jakarta Selatan 12345",
   phone: "(021) 000-0000",
   email: "sales@contoh-labtech.co.id",
@@ -18,6 +18,8 @@ export const LETTERHEAD = {
     finance: { name: "Sari Lestari", title: "Finance Manager" },
     service: { name: "Yusuf Maulana", title: "Service Manager" },
     sales: { name: "Hendra Wijaya", title: "Sales Manager" },
+    shipping: { name: "Rudi Hartono", title: "Logistics & Export Manager" },
+    training: { name: "Yusuf Maulana", title: "Training & Service Manager" },
   },
   /** Domisili hukum pada perjanjian (dummy). */
   jurisdiction: "Pengadilan Negeri Jakarta Selatan",

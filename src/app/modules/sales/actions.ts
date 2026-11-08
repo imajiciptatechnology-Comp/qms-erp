@@ -23,11 +23,17 @@ type Result = { success: true; id?: string } | { success: false; message: string
 // ---------------------------------------------------------
 
 /** Server action tidak terlindungi middleware: cek login & permission di setiap aksi. */
-async function guard(need: "view" | "manage" | "approve" | "finance" = "view"): Promise<CurrentUser> {
+async function guard(need: "view" | "manage" | "approve" | "finance" | "shipping" | "any" = "view"): Promise<CurrentUser> {
   const user = await getCurrentUser();
   if (!user) throw new Error("Silakan login terlebih dahulu.");
   const access = salesAccess(user, await getRolesConfig());
-  const ok = { view: access.canView, manage: access.canManage, approve: access.canApprove, finance: access.canFinance }[need];
+  const ok = {
+    view: access.canView, manage: access.canManage, approve: access.canApprove, finance: access.canFinance,
+    // Kontrak dikelola di modul Contract & Shipping.
+    shipping: access.canShipping,
+    // Data bersama (kontrak, customer) juga dibaca modul Contract & Shipping dan Training & CS.
+    any: access.canView || access.canShipping || access.canService || access.canApprove,
+  }[need];
   if (!ok) throw new Error("Anda tidak punya akses untuk aksi ini.");
   return user;
 }
@@ -35,7 +41,8 @@ async function guard(need: "view" | "manage" | "approve" | "finance" = "view"): 
 async function run(fn: () => Promise<string | void>): Promise<Result> {
   try {
     const id = await fn();
-    revalidatePath("/modules/sales", "layout");
+    // Sales, Contract & Shipping, dan Training & CS berbagi data yang sama.
+    revalidatePath("/modules", "layout");
     return { success: true, id: id || undefined };
   } catch (err) {
     return { success: false, message: err instanceof Error ? err.message : "Terjadi kesalahan." };
@@ -125,7 +132,11 @@ export async function getSalesOrder(id: string) {
   await guard();
   return prisma.salesOrder.findUnique({
     where: { id },
-    include: { customer: true, quotation: { select: { id: true, quotationNo: true, revision: true } }, items: { orderBy: { sortOrder: "asc" } }, invoices: { orderBy: { invoiceDate: "asc" } }, contracts: true },
+    include: {
+      customer: true, quotation: { select: { id: true, quotationNo: true, revision: true } }, items: { orderBy: { sortOrder: "asc" } }, invoices: { orderBy: { invoiceDate: "asc" } }, contracts: true,
+      salesShipments: { select: { id: true, shipmentNo: true, status: true, mode: true, destination: true, exceptionStatus: true }, orderBy: { createdAt: "asc" } },
+      serviceJobs: { select: { id: true, jobNo: true, status: true, type: true, startDate: true }, orderBy: { createdAt: "asc" } },
+    },
   });
 }
 
@@ -164,12 +175,12 @@ export async function getInvoiceFormData() {
 }
 
 export async function getContracts() {
-  await guard();
+  await guard("any");
   return prisma.contract.findMany({ include: { customer: { select: { name: true } }, salesOrder: { select: { id: true, soNo: true } } }, orderBy: { endDate: "asc" } });
 }
 
 export async function getContract(id: string) {
-  await guard();
+  await guard("any");
   const c = await prisma.contract.findUnique({
     where: { id },
     include: { customer: true, salesOrder: { select: { id: true, soNo: true, bastNo: true } }, invoices: { orderBy: { invoiceDate: "asc" }, select: { id: true, invoiceNo: true, periodLabel: true, total: true, paidAmount: true, status: true, dueDate: true } } },
@@ -184,7 +195,7 @@ export async function getContract(id: string) {
 
 /** Alat terpasang milik customer: dari SO yang sudah BAST (+ nomor seri) dan dari kontrak sebelumnya. */
 export async function getInstalledBase(customerId: string): Promise<ContractItem[]> {
-  await guard();
+  await guard("any");
   const [orders, contracts] = await Promise.all([
     prisma.salesOrder.findMany({ where: { customerId, status: { in: ["Installed", "Completed"] } }, include: { items: true } }),
     prisma.contract.findMany({ where: { customerId }, select: { coveredItemsJson: true } }),
@@ -207,7 +218,7 @@ export async function getInstalledBase(customerId: string): Promise<ContractItem
 }
 
 export async function getContractFormData() {
-  await guard();
+  await guard("shipping");
   const [customers, prices] = await Promise.all([
     prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, type: true, paymentTerms: true, contactName: true, contactTitle: true, signatoryName: true, signatoryTitle: true } }),
     prisma.product.findMany({ where: { category: "Jasa" }, select: { sku: true, name: true, price: true } }),
@@ -264,7 +275,7 @@ export async function saveProduct(id: string | null, data: ProductInput) {
 // Pipeline
 // ---------------------------------------------------------
 
-export type OpportunityInput = { title: string; customerId: string; source: string; estimatedValue: number; expectedCloseDate?: string; notes?: string };
+export type OpportunityInput = { title: string; customerId: string; source: string; estimatedValue: number; expectedCloseDate?: string; notes?: string; tenderNo?: string; tenderDeadline?: string };
 
 export async function createOpportunity(data: OpportunityInput) {
   return run(async () => {
@@ -274,7 +285,7 @@ export async function createOpportunity(data: OpportunityInput) {
     const rows = await prisma.opportunity.findMany({ where: { opportunityNo: { startsWith: `OPP-${year}-` } }, select: { opportunityNo: true } });
     const max = rows.reduce((m, r) => Math.max(m, Number(r.opportunityNo.split("-").pop()) || 0), 0);
     const created = await prisma.opportunity.create({ data: {
-      ...data, opportunityNo: `OPP-${year}-${String(max + 1).padStart(3, "0")}`, stage: "Lead", probability: STAGE_PROBABILITY.Lead,
+      ...data, tenderNo: data.tenderNo?.trim() || null, tenderDeadline: data.tenderDeadline || null, opportunityNo: `OPP-${year}-${String(max + 1).padStart(3, "0")}`, stage: "Lead", probability: STAGE_PROBABILITY.Lead,
       salesName: user.name, createdAt: today(), historyJson: firstHistory(user.name, "Opportunity dibuat"),
     } });
     return created.id;
@@ -443,48 +454,26 @@ export async function toggleContractReview(id: string, index: number) {
   });
 }
 
-/** Maju satu langkah: Contract Review → Confirmed → In Delivery → Installed → Completed. */
-export async function advanceSalesOrder(id: string, extra?: { bastNo?: string; bastDate?: string; serials?: Record<string, string> }) {
+/**
+ * Maju satu langkah: Contract Review → Confirmed, atau Installed → Completed.
+ * Confirmed → In Delivery terjadi saat shipment dikirim (modul Contract & Shipping);
+ * In Delivery → Installed saat BAST instalasi & training (modul Training & Customer Service).
+ */
+export async function advanceSalesOrder(id: string) {
   return run(async () => {
     const user = await guard("manage");
     const so = await prisma.salesOrder.findUniqueOrThrow({ where: { id }, include: { items: true } });
-    const next: Record<string, string> = { "Contract Review": "Confirmed", Confirmed: "In Delivery", "In Delivery": "Installed", Installed: "Completed" };
+    const next: Record<string, string> = { "Contract Review": "Confirmed", Installed: "Completed" };
     const to = next[so.status];
+    if (so.status === "Confirmed") throw new Error("Pengiriman dicatat di modul Contract & Shipping (setelah pelunasan).");
+    if (so.status === "In Delivery") throw new Error("BAST instalasi & training dicatat di modul Training & Customer Service.");
     if (!to) throw new Error("Sales Order ini sudah selesai.");
 
     if (to === "Confirmed") {
       const review = JSON.parse(so.contractReviewJson) as { ok: boolean }[];
       if (review.some(r => !r.ok)) throw new Error("Lengkapi semua item contract review dulu.");
     }
-    if (to === "Installed" && (!extra?.bastNo?.trim() || !extra.bastDate)) throw new Error("Nomor dan tanggal BAST wajib diisi.");
-
-    const ops = [];
-    if (extra?.serials) {
-      for (const it of so.items) if (extra.serials[it.id] !== undefined) ops.push(prisma.salesOrderItem.update({ where: { id: it.id }, data: { serialNumbers: extra.serials[it.id] || null } }));
-    }
-    ops.push(prisma.salesOrder.update({ where: { id }, data: {
-      status: to,
-      ...(to === "Installed" ? { bastNo: extra!.bastNo, bastDate: extra!.bastDate, installationDate: extra!.bastDate } : {}),
-      historyJson: addHistory(so.historyJson, user.name, `Status: ${so.status} → ${to}${to === "Installed" ? ` (BAST ${extra!.bastNo})` : ""}`),
-    } }));
-    await prisma.$transaction(ops);
-
-    // Setelah BAST: buat kontrak garansi otomatis untuk alat yang bergaransi.
-    if (to === "Installed") {
-      const productIds = so.items.map(i => i.productId).filter(Boolean) as string[];
-      const products = await prisma.product.findMany({ where: { id: { in: productIds }, warrantyMonths: { gt: 0 } } });
-      if (products.length) {
-        const months = Math.max(...products.map(p => p.warrantyMonths));
-        const end = new Date(extra!.bastDate!);
-        end.setMonth(end.getMonth() + months);
-        const covered = so.items.filter(i => products.some(p => p.id === i.productId)).map(i => ({ product: i.description, serialNumber: extra?.serials?.[i.id] || i.serialNumbers || "-" }));
-        await prisma.contract.create({ data: {
-          contractNo: await nextDocNo("CTR", extra!.bastDate!), customerId: so.customerId, salesOrderId: so.id, type: "Garansi",
-          title: `Garansi ${so.soNo}`, startDate: extra!.bastDate!, endDate: end.toISOString().split("T")[0], value: 0, status: "Active",
-          coveredItemsJson: JSON.stringify(covered), createdAt: today(), historyJson: firstHistory(user.name, `Dibuat otomatis dari BAST ${extra!.bastNo}`),
-        } });
-      }
-    }
+    await prisma.salesOrder.update({ where: { id }, data: { status: to, historyJson: addHistory(so.historyJson, user.name, `Status: ${so.status} → ${to}`) } });
   });
 }
 
@@ -648,7 +637,7 @@ function contractFields(data: ContractInput) {
 /** Kontrak baru: Garansi langsung Active; AMC/Kalibrasi/Service mulai sebagai Draft dan butuh approval. */
 export async function createContract(data: ContractInput, aiNote?: string) {
   return run(async () => {
-    const user = await guard("manage");
+    const user = await guard("shipping");
     const fields = contractFields(data);
     const created = await prisma.contract.create({ data: {
       ...fields, contractNo: await nextDocNo("CTR", data.startDate), status: data.type === "Garansi" ? "Active" : "Draft", createdAt: today(),
@@ -660,7 +649,7 @@ export async function createContract(data: ContractInput, aiNote?: string) {
 
 export async function updateContract(id: string, data: ContractInput) {
   return run(async () => {
-    const user = await guard("manage");
+    const user = await guard("shipping");
     const old = await prisma.contract.findUniqueOrThrow({ where: { id } });
     if (old.status !== "Draft") throw new Error("Hanya kontrak berstatus Draft yang bisa diedit.");
     await prisma.contract.update({ where: { id }, data: { ...contractFields(data), historyJson: addHistory(old.historyJson, user.name, "Kontrak diedit") } });
@@ -671,12 +660,12 @@ export async function updateContract(id: string, data: ContractInput) {
 /** Draft → Waiting Approval, dengan batas keputusan 7 hari kerja. */
 export async function submitContract(id: string) {
   return run(async () => {
-    const user = await guard("manage");
+    const user = await guard("shipping");
     const c = await prisma.contract.findUniqueOrThrow({ where: { id }, include: { customer: { select: { name: true } } } });
     if (c.status !== "Draft") throw new Error("Kontrak ini sudah diajukan.");
     const due = addBusinessDays(today(), CONTRACT_APPROVAL_BUSINESS_DAYS);
     await prisma.contract.update({ where: { id }, data: { status: "Waiting Approval", approvalDueDate: due, historyJson: addHistory(c.historyJson, user.name, `Diajukan untuk persetujuan (batas ${due})`) } });
-    await createNotificationForPermission(PERM.approve, `Kontrak ${c.contractNo} (${c.customer.name}) menunggu persetujuan, batas ${due}`, `/modules/sales/contracts/${id}`);
+    await createNotificationForPermission(PERM.approve, `Kontrak ${c.contractNo} (${c.customer.name}) menunggu persetujuan, batas ${due}`, `/modules/contract-shipping/contracts/${id}`);
   });
 }
 
@@ -697,7 +686,7 @@ export async function decideContract(id: string, decision: "approve" | "reject",
 
 export async function markContractSent(id: string) {
   return run(async () => {
-    const user = await guard("manage");
+    const user = await guard("shipping");
     const c = await prisma.contract.findUniqueOrThrow({ where: { id } });
     if (c.status !== "Approved") throw new Error("Hanya kontrak yang sudah disetujui yang bisa dikirim.");
     await prisma.contract.update({ where: { id }, data: { status: "Sent", historyJson: addHistory(c.historyJson, user.name, "Dokumen perjanjian dikirim ke customer") } });
@@ -707,7 +696,7 @@ export async function markContractSent(id: string) {
 /** Upload scan perjanjian yang sudah ditandatangani dua pihak + meterai → kontrak Active. */
 export async function uploadSignedContract(formData: FormData) {
   return run(async () => {
-    const user = await guard("manage");
+    const user = await guard("shipping");
     const id = String(formData.get("contractId"));
     const file = formData.get("file") as File | null;
     if (!file || file.size === 0) throw new Error("Pilih file scan perjanjian yang sudah ditandatangani.");
@@ -728,7 +717,7 @@ export async function uploadSignedContract(formData: FormData) {
 /** Perpanjang: salin alat & syarat ke Draft periode berikutnya (Garansi → AMC). Kontrak lama ditutup saat perpanjangan aktif. */
 export async function renewContract(id: string) {
   return run(async () => {
-    const user = await guard("manage");
+    const user = await guard("shipping");
     const c = await prisma.contract.findUniqueOrThrow({ where: { id } });
     if (["Renewed", "Terminated", "Draft", "Waiting Approval"].includes(c.status)) throw new Error("Kontrak ini tidak bisa diperpanjang.");
     const existing = await prisma.contract.findFirst({ where: { renewedFromId: id, status: { notIn: ["Terminated"] } } });
@@ -781,7 +770,7 @@ export async function aiDraftQuotation(input: { customerId: string; request: str
 
 export async function aiDraftContract(input: { customerId: string; type: string; request: string }) {
   try {
-    await guard("manage");
+    await guard("shipping");
     if (!input.customerId) throw new Error("Pilih customer dulu.");
     const installedBase = await getInstalledBase(input.customerId);
     const result = await generateContractDraft({ ...input, installedBase });

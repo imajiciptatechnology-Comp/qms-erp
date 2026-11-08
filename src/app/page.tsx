@@ -14,6 +14,7 @@ import { redirect } from "next/navigation";
 import { getCurrentUser } from "./actions/auth";
 import { getRolesConfig } from "@/lib/authServer";
 import { logisticsAccess } from "./modules/logistics/lib";
+import { canSeeService, canSeeShipping, salesAccess } from "./modules/sales/lib";
 
 // Server Action "Generate Analysis" memanggil AI dan bisa butuh puluhan detik.
 export const maxDuration = 60;
@@ -28,6 +29,11 @@ export default async function Home() {
     if (!perms.includes("all") && !perms.includes("dashboard")) {
       if (log.isDriver) redirect("/driver");
       if (log.canView) redirect("/modules/logistics");
+      // Role Labtech tanpa Dashboard QMS: langsung ke modul Labtech pertama yang bisa dibuka.
+      const lt = salesAccess(me, roles);
+      if (lt.canView) redirect("/modules/sales");
+      if (canSeeShipping(lt)) redirect("/modules/contract-shipping");
+      if (canSeeService(lt)) redirect("/modules/customer-service");
     }
   }
   const [{ kpi, charts, recentNCs, recentIncidents, activeMocList }, aiInsights] = await Promise.all([

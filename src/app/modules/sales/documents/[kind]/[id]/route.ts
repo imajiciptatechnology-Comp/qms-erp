@@ -1,7 +1,7 @@
 import { getCurrentUser } from "@/app/actions/auth";
 import { getRolesConfig } from "@/lib/authServer";
-import { salesAccess } from "../../../lib";
-import { DOC_KINDS, buildDocument, type DocKind } from "../../builders";
+import { canSeeService, canSeeShipping, salesAccess } from "../../../lib";
+import { DOC_KINDS, SERVICE_DOCS, SHIPPING_DOCS, buildDocument, type DocKind } from "../../builders";
 import { renderPdf } from "../../pdf";
 import { renderDocx } from "../../docx";
 
@@ -10,10 +10,19 @@ export const runtime = "nodejs";
 /** GET /modules/sales/documents/{jenis}/{id}?format=pdf|docx — unduh dokumen Sales dengan kop surat. */
 export async function GET(req: Request, { params }: { params: Promise<{ kind: string; id: string }> }) {
   const user = await getCurrentUser();
-  if (!user || !salesAccess(user, await getRolesConfig()).canView) return new Response("Tidak ada akses.", { status: 403 });
+  if (!user) return new Response("Tidak ada akses.", { status: 403 });
+  const access = salesAccess(user, await getRolesConfig());
 
   const { kind, id } = await params;
   if (!DOC_KINDS.includes(kind as DocKind)) return new Response("Jenis dokumen tidak dikenal.", { status: 404 });
+  // Dokumen modul Contract & Shipping / Training & CS mengikuti akses modulnya; kontrak & BAST juga dibuka dari sana.
+  const k = kind as DocKind;
+  const allowed = SHIPPING_DOCS.includes(k) ? canSeeShipping(access) || access.canView
+    : SERVICE_DOCS.includes(k) ? canSeeService(access) || access.canView
+    : k === "contract" ? access.canView || canSeeShipping(access) || canSeeService(access)
+    : k === "bast" ? access.canView || canSeeService(access)
+    : access.canView;
+  if (!allowed) return new Response("Tidak ada akses.", { status: 403 });
   const doc = await buildDocument(kind as DocKind, id);
   if (!doc) return new Response("Dokumen tidak ditemukan.", { status: 404 });
 

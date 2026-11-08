@@ -6,7 +6,10 @@ import { bulanTahun, hari, safeName, tanggal, terbilang, terbilangRupiah } from 
 import { LETTERHEAD as L } from "./letterhead";
 import type { Block, DocModel } from "./model";
 
-export const DOC_KINDS = ["quotation", "invoice", "receipt", "contract", "bast", "order-confirmation", "reminder"] as const;
+export const DOC_KINDS = ["quotation", "invoice", "receipt", "contract", "bast", "order-confirmation", "reminder", "packing-list", "delivery-order", "training-report", "training-certificate"] as const;
+/** Dokumen milik modul Contract & Shipping / Training & CS (akses mengikuti modul tsb). */
+export const SHIPPING_DOCS: DocKind[] = ["packing-list", "delivery-order"];
+export const SERVICE_DOCS: DocKind[] = ["training-report", "training-certificate"];
 export type DocKind = (typeof DOC_KINDS)[number];
 
 const S = L.signatories;
@@ -281,8 +284,127 @@ async function reminder(id: string): Promise<DocModel | null> {
   };
 }
 
+// ---------------------------------------------------------
+// Contract & Shipping: Packing List & Surat Jalan
+// ---------------------------------------------------------
+type Crate = { crateNo: string; contents: string; dims?: string; grossKg?: number | null; netKg?: number | null };
+
+async function shipmentDoc(id: string, kind: "packing-list" | "delivery-order"): Promise<DocModel | null> {
+  const s = await prisma.salesShipment.findUnique({ where: { id }, include: { customer: true, salesOrder: true } });
+  if (!s) return null;
+  const crates = JSON.parse(s.packagesJson || "[]") as Crate[];
+  const kg = (n?: number | null) => (n ? `${Number(n).toLocaleString("id-ID")} kg` : "-");
+  const gross = crates.reduce((t, c) => t + (Number(c.grossKg) || 0), 0);
+  const net = crates.reduce((t, c) => t + (Number(c.netKg) || 0), 0);
+  const recipient = { label: kind === "packing-list" ? "Consignee" : "Kepada Yth.", name: s.customer.name, lines: lines(s.destination, s.customer.contactName && `U.p. ${s.customer.contactName}${s.customer.contactPhone ? ` (${s.customer.contactPhone})` : ""}`) };
+  const watermark = s.status === "Cancelled" ? "DIBATALKAN" as const : s.status === "Draft" ? "DRAFT" as const : undefined;
+  const route: [string, string][] = [
+    ["Sales Order / PO", `${s.salesOrder.soNo} / ${s.salesOrder.customerPoNo}`],
+    ["Moda", `${s.mode}${s.incoterm ? ` · ${s.incoterm}` : ""} (${s.scope})`],
+    ["Rute", `${s.origin} → ${s.destination}`],
+    ...(s.forwarder ? [["Forwarder", s.forwarder] as [string, string]] : []),
+    ...(s.vessel ? [["Kapal / penerbangan", s.vessel] as [string, string]] : []),
+    ...(s.awbNo ? [["B/L / AWB", s.awbNo] as [string, string]] : []),
+    ...(s.containerNo ? [["Kontainer", s.containerNo] as [string, string]] : []),
+  ];
+
+  if (kind === "packing-list") {
+    return {
+      fileName: safeName(`Packing List ${s.shipmentNo} - ${s.customer.name}`), title: "PACKING LIST", number: s.shipmentNo, watermark, recipient,
+      meta: [["Tanggal", tanggal(s.etd ?? s.createdAt)], ["ETD / ETA", `${tanggal(s.etd)} / ${tanggal(s.eta)}`]],
+      blocks: [
+        { type: "kv", title: "Pengiriman", rows: route },
+        { type: "table", columns: [{ label: "No. Peti", width: 14 }, { label: "Isi", width: 44 }, { label: "Dimensi (cm)", width: 16 }, { label: "Gross", width: 13, align: "right" }, { label: "Net", width: 13, align: "right" }],
+          rows: crates.map(c => [{ text: c.crateNo, bold: true }, c.contents, c.dims || "-", kg(c.grossKg), kg(c.netKg)]) },
+        { type: "totals", rows: [["Jumlah peti", `${crates.length} peti`], ["Total net", kg(net)]], total: ["TOTAL GROSS", kg(gross)] },
+        { type: "note", text: "Barang diproduksi oleh PT Labtech Penta International, Batam, Indonesia. Mohon periksa jumlah dan kondisi peti saat penerimaan." },
+      ],
+      signatures: [{ lead: "Disiapkan oleh,", org: L.company, name: S.shipping.name, title: S.shipping.title }],
+    };
+  }
+  return {
+    fileName: safeName(`Surat Jalan ${s.shipmentNo} - ${s.customer.name}`), title: "SURAT JALAN / DELIVERY ORDER", number: s.shipmentNo, watermark, recipient,
+    meta: [["Tanggal kirim", tanggal(s.shippedAt ?? s.etd)], ["Alamat kirim", s.destination]],
+    blocks: [
+      { type: "para", text: "Bersama ini kami kirimkan barang-barang berikut dalam keadaan baik:" },
+      { type: "table", columns: [{ label: "No", width: 6, align: "center" }, { label: "No. Peti", width: 16 }, { label: "Isi", width: 58 }, { label: "Gross", width: 20, align: "right" }],
+        rows: crates.map((c, i) => [String(i + 1), { text: c.crateNo, bold: true }, c.contents, kg(c.grossKg)]) },
+      { type: "kv", title: "Pengiriman", rows: route },
+      { type: "para", text: "Mohon tanda tangan dan cap pada kolom penerima sebagai bukti barang telah diterima. Instalasi dan training akan dijadwalkan oleh tim Training & Customer Service kami." },
+    ],
+    signatures: [
+      { lead: "Pengirim,", org: L.company, name: S.shipping.name, title: S.shipping.title },
+      { lead: "Penerima,", org: s.customer.name, name: s.receivedBy || "....................", title: "" },
+    ],
+  };
+}
+
+// ---------------------------------------------------------
+// Training & Customer Service: laporan & sertifikat training
+// ---------------------------------------------------------
+type Person = { name: string; title?: string; attended: boolean; pre?: number | null; post?: number | null };
+
+async function trainingDoc(rawId: string, kind: "training-report" | "training-certificate"): Promise<DocModel | null> {
+  const [id, idx] = rawId.split("~");
+  const j = await prisma.serviceJob.findUnique({ where: { id }, include: { customer: true, salesOrder: { select: { soNo: true } } } });
+  if (!j) return null;
+  const people = JSON.parse(j.participantsJson || "[]") as Person[];
+  const period = j.startDate ? `${tanggal(j.startDate)}${j.endDate && j.endDate !== j.startDate ? ` – ${tanggal(j.endDate)}` : ""}` : "-";
+  const topics = j.topics || "Pengoperasian, perawatan, dan pemanfaatan trainer Labtech untuk pembelajaran praktik";
+
+  if (kind === "training-certificate") {
+    const n = Number(idx);
+    const p = people[n];
+    if (!p || !p.attended || j.status !== "Completed") return null;
+    return {
+      fileName: safeName(`Sertifikat Training ${p.name} - ${j.jobNo}`), title: "SERTIFIKAT PELATIHAN", number: `${j.jobNo}/P${String(n + 1).padStart(2, "0")}`,
+      blocks: [
+        { type: "para", align: "center", text: "Diberikan kepada" },
+        { type: "heading", text: p.name },
+        { type: "para", align: "center", text: `${p.title ? `${p.title} — ` : ""}${j.customer.name}` },
+        { type: "para", align: "center", text: `atas partisipasinya dalam ${j.type === "Training" ? "pelatihan" : "pelatihan dan serah terima"} peralatan praktik Labtech (Training of Trainers) yang diselenggarakan pada ${period}${j.location ? ` di ${j.location}` : ""}${j.mode === "Online" ? " secara daring" : ""}.` },
+        { type: "kv", title: "Materi", rows: [["Topik", topics], ...(typeof p.post === "number" ? [["Nilai akhir", `${p.post}`] as [string, string]] : [])] },
+      ],
+      signatures: [
+        { lead: `${L.city}, ${tanggal(j.bastDate ?? j.endDate ?? j.startDate)}`, org: L.company, name: j.trainerName || S.training.name, title: j.trainerName ? "Trainer" : S.training.title },
+        { lead: "Mengetahui,", org: L.company, name: S.training.name, title: S.training.title },
+      ],
+    };
+  }
+
+  const attended = people.filter(p => p.attended);
+  const avg = (k: "pre" | "post") => { const v = attended.map(p => p[k]).filter((x): x is number => typeof x === "number"); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length) : null; };
+  const pre = avg("pre");
+  const post = avg("post");
+  return {
+    fileName: safeName(`Laporan Training ${j.jobNo} - ${j.customer.name}`), title: "LAPORAN PELAKSANAAN TRAINING", number: j.jobNo,
+    watermark: j.status === "Cancelled" ? "DIBATALKAN" : j.status === "Completed" ? undefined : "DRAFT",
+    recipient: { label: "Customer", name: j.customer.name, lines: lines(j.location) },
+    meta: [["Periode", period], ["Jenis", `${j.type} · ${j.mode}`], ...(j.salesOrder ? [["Sales Order", j.salesOrder.soNo] as [string, string]] : [])],
+    blocks: [
+      { type: "kv", title: "Pelaksanaan", rows: [["Trainer", j.trainerName || "-"], ["Teknisi", j.technicians || "-"], ["Materi", topics]] },
+      { type: "table", columns: [{ label: "No", width: 6, align: "center" }, { label: "Nama", width: 34 }, { label: "Jabatan", width: 28 }, { label: "Hadir", width: 10, align: "center" }, { label: "Pre", width: 11, align: "right" }, { label: "Post", width: 11, align: "right" }],
+        rows: people.map((p, i) => [String(i + 1), { text: p.name, bold: true }, p.title || "-", p.attended ? "Ya" : "Tidak", p.pre ?? "-", p.post ?? "-"].map(v => (typeof v === "number" ? String(v) : v))) },
+      { type: "kv", title: "Ringkasan", rows: [
+        ["Peserta hadir", `${attended.length} dari ${people.length} orang`],
+        ["Rata-rata nilai", pre !== null || post !== null ? `pre-test ${pre ?? "-"} → post-test ${post ?? "-"}` : "-"],
+        ["Kepuasan client", j.feedbackScore ? `${j.feedbackScore}/5${j.feedbackNote ? ` — ${j.feedbackNote}` : ""}` : "-"],
+        ["BAST", j.bastNo ? `${j.bastNo} (${tanggal(j.bastDate)})` : "-"],
+      ] },
+    ],
+    signatures: [
+      { lead: "Trainer,", org: L.company, name: j.trainerName || S.training.name, title: j.trainerName ? "Trainer" : S.training.title },
+      { lead: "Mengetahui,", org: j.customer.name, name: j.customer.signatoryName || j.customer.contactName || "....................", title: j.customer.signatoryTitle || j.customer.contactTitle || "" },
+    ],
+  };
+}
+
 export async function buildDocument(kind: DocKind, id: string): Promise<DocModel | null> {
   switch (kind) {
+    case "packing-list": return shipmentDoc(id, "packing-list");
+    case "delivery-order": return shipmentDoc(id, "delivery-order");
+    case "training-report": return trainingDoc(id, "training-report");
+    case "training-certificate": return trainingDoc(id, "training-certificate");
     case "quotation": return quotation(id);
     case "invoice": return invoice(id);
     case "receipt": return receipt(id);

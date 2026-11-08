@@ -2,13 +2,15 @@ import Link from "next/link";
 import { AlertTriangle, FileSignature, Receipt, Target, Trophy } from "lucide-react";
 import { getSalesAccess } from "./access";
 import { getSalesOverview } from "./actions";
+import { getApprovalQueue } from "./server";
 import { STAGES, contractState, daysBetween, invoiceState, rupiah, rupiahShort, today } from "./lib";
 import { Card, StatCard, StatusBadge } from "./ui";
 
 export default async function SalesOverviewPage() {
   const { access } = await getSalesAccess();
   if (!access.canView) return null;
-  const { opportunities, waitingApproval, contractApprovals, openInvoices, activeContracts, openOrders } = await getSalesOverview();
+  const [{ opportunities, openInvoices, activeContracts, openOrders }, approvals] = await Promise.all([getSalesOverview(), getApprovalQueue()]);
+  const decidable = approvals.filter(a => a.decidable);
 
   const open = opportunities.filter(o => !["Won", "Lost"].includes(o.stage));
   const pipelineValue = open.reduce((s, o) => s + o.estimatedValue, 0);
@@ -57,38 +59,24 @@ export default async function SalesOverviewPage() {
           </table>
         </Card>
 
-        <Card title={`Menunggu persetujuan (${waitingApproval.length + contractApprovals.length})`} className="xl:col-span-2">
-          {contractApprovals.length > 0 && (
-            <ul className="divide-y divide-slate-100 mb-2">
-              {contractApprovals.map(c => {
-                const late = !!c.approvalDueDate && today() > c.approvalDueDate;
+        <Card title={`Dashboard persetujuan (${decidable.length})`} className="xl:col-span-2" actions={<Link href="/modules/sales/approvals" className="text-sm text-blue-600 hover:underline">Buka semua</Link>}>
+          {approvals.length === 0 ? <p className="text-sm text-slate-500">Tidak ada yang menunggu persetujuan.</p> : (
+            <ul className="divide-y divide-slate-100">
+              {approvals.slice(0, 6).map(a => {
+                const late = !!a.dueDate && today() > a.dueDate;
                 return (
-                  <li key={c.id}>
-                    <Link href={`/modules/sales/contracts/${c.id}`} className="flex items-center justify-between gap-4 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
+                  <li key={a.kind + a.id}>
+                    <Link href="/modules/sales/approvals" className="flex items-center justify-between gap-4 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
                       <div className="min-w-0">
-                        <p className="font-semibold text-slate-800 text-sm">{c.contractNo} <span className="text-slate-500 font-normal">· Kontrak {c.type}</span></p>
-                        <p className="text-xs text-slate-500 truncate">{c.customer.name} · {rupiah(c.value)}</p>
+                        <p className="font-semibold text-slate-800 text-sm">{a.ref} <span className="text-slate-500 font-normal">· {a.title}</span></p>
+                        <p className="text-xs text-slate-500 truncate">{a.customer} · {a.detail}</p>
                       </div>
-                      <span className={`text-xs font-semibold shrink-0 ${late ? "text-red-700" : "text-amber-800"}`}>{late ? `Lewat batas ${c.approvalDueDate}` : `Batas ${c.approvalDueDate}`}</span>
+                      {a.dueDate ? <span className={`text-xs font-semibold shrink-0 ${late ? "text-red-700" : "text-amber-800"}`}>{late ? `Lewat batas ${a.dueDate}` : `Batas ${a.dueDate}`}</span>
+                        : a.amount ? <span className="text-sm font-semibold text-slate-800 tabular-nums shrink-0">{rupiah(a.amount)}</span> : null}
                     </Link>
                   </li>
                 );
               })}
-            </ul>
-          )}
-          {waitingApproval.length === 0 ? (contractApprovals.length ? null : <p className="text-sm text-slate-500">Tidak ada penawaran atau kontrak yang menunggu persetujuan.</p>) : (
-            <ul className="divide-y divide-slate-100">
-              {waitingApproval.map(q => (
-                <li key={q.id}>
-                  <Link href={`/modules/sales/quotations/${q.id}`} className="flex items-center justify-between gap-4 py-2.5 hover:bg-slate-50 -mx-2 px-2 rounded-lg">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-slate-800 text-sm">{q.quotationNo} <span className="text-slate-500 font-normal">Rev.{q.revision}</span></p>
-                      <p className="text-xs text-slate-500 truncate">{q.customer.name} · diskon {q.discountPercent}% · {q.salesName}</p>
-                    </div>
-                    <span className="text-sm font-semibold text-slate-800 tabular-nums">{rupiah(q.total)}</span>
-                  </Link>
-                </li>
-              ))}
             </ul>
           )}
         </Card>
@@ -116,7 +104,7 @@ export default async function SalesOverviewPage() {
           )}
         </Card>
 
-        <Card title="Kontrak perlu perhatian" actions={<Link href="/modules/sales/contracts" className="text-sm text-blue-600 hover:underline">Semua kontrak</Link>}>
+        <Card title="Kontrak perlu perhatian" actions={<Link href="/modules/contract-shipping/contracts" className="text-sm text-blue-600 hover:underline">Semua kontrak</Link>}>
           {attention.length === 0 ? <p className="text-sm text-slate-500">Tidak ada kontrak yang akan habis dalam 60 hari.</p> : (
             <ul className="divide-y divide-slate-100">
               {attention.map(c => (

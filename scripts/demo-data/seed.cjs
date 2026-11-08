@@ -12,6 +12,7 @@ const path = require("path");
 const { prisma, supabase, BUCKET, STORAGE_DIR } = require("./common.cjs");
 const { clearDemo } = require("./clear.cjs");
 const { seedSales } = require("./seed-sales.cjs");
+const { seedLabtech } = require("./seed-labtech.cjs");
 
 const day = n => {
   const d = new Date();
@@ -173,6 +174,7 @@ async function main() {
 
   // ---------- Sales & Marketing ----------
   await seedSales();
+  await seedLabtech();
 
   console.log("Data demo berhasil dibuat (awalan DEMO-, file di storage folder demo/).");
 }

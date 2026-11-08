@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Calculator, Loader2, Lock, Plus, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import VoiceButton from "@/components/VoiceButton";
-import { aiDraftContract, createContract, getInstalledBase, updateContract, type ContractInput, type ContractItem } from "../actions";
-import { buildClauses, defaultScope, type Clause } from "../documents/contractTemplates";
-import { CONTRACT_TYPES, addDays, rupiah, today } from "../lib";
-import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
+import { aiDraftContract, createContract, getInstalledBase, updateContract, type ContractInput, type ContractItem } from "@/app/modules/sales/actions";
+import { buildClauses, defaultScope, type Clause } from "@/app/modules/sales/documents/contractTemplates";
+import { CONTRACT_TYPES, addDays, rupiah, today } from "@/app/modules/sales/lib";
+import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "@/app/modules/sales/ui";
 
 type Customer = { id: string; name: string; type: string; paymentTerms: string; contactName: string | null; contactTitle: string | null; signatoryName: string | null; signatoryTitle: string | null };
 
@@ -90,7 +90,7 @@ export default function ContractForm({ customers, servicePrices, initial, contra
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const aiNote = aiInfo ? `acuan: ${aiInfo.references.join(", ") || "pasal baku"}` : undefined;
-    exec(() => (contractId ? updateContract(contractId, form) : createContract(form, aiNote)), id => router.push(`/modules/sales/contracts/${id ?? contractId}`));
+    exec(() => (contractId ? updateContract(contractId, form) : createContract(form, aiNote)), id => router.push(`/modules/contract-shipping/contracts/${id ?? contractId}`));
   }
 
   return (
@@ -232,7 +232,7 @@ export default function ContractForm({ customers, servicePrices, initial, contra
 
       <ErrorNote error={error} />
       <div className="flex justify-end gap-2">
-        <Link href={contractId ? `/modules/sales/contracts/${contractId}` : "/modules/sales/contracts"} className={btnSecondary}>Batal</Link>
+        <Link href={contractId ? `/modules/contract-shipping/contracts/${contractId}` : "/modules/contract-shipping/contracts"} className={btnSecondary}>Batal</Link>
         <button type="submit" className={btnPrimary} disabled={pending}>{pending ? "Menyimpan…" : isWarranty ? "Simpan garansi" : "Simpan sebagai Draft"}</button>
       </div>
     </form>

@@ -538,8 +538,8 @@ model KvStore {
 // ---------------------------------------------------------
 
 model Customer {
-  id             String        @id @default(cuid())
-  customerNo     String        @unique
+  id             String          @id @default(cuid())
+  customerNo     String          @unique
   name           String
   type           String // Universitas | Rumah Sakit | Farmasi | Lab Pangan | Pemerintah | Industri
   npwp           String?
@@ -549,16 +549,19 @@ model Customer {
   contactTitle   String?
   contactEmail   String?
   contactPhone   String?
-  paymentTerms   String        @default("30 hari")
-  status         String        @default("Active")
+  paymentTerms   String          @default("30 hari")
+  status         String          @default("Active")
   notes          String?
   createdAt      String
-  historyJson    String        @default("[]")
+  historyJson    String          @default("[]")
   opportunities  Opportunity[]
   quotations     Quotation[]
   salesOrders    SalesOrder[]
   invoices       Invoice[]
   contracts      Contract[]
+  salesShipments SalesShipment[]
+  serviceJobs    ServiceJob[]
+  serviceTickets ServiceTicket[]
   signatoryName  String?
   signatoryTitle String?
 }
@@ -596,6 +599,9 @@ model Opportunity {
   salesName         String
   lostReason        String?
   notes             String?
+  /// Tender (LPSE / UN / donor): nomor paket & batas pemasukan penawaran.
+  tenderNo          String?
+  tenderDeadline    String?
   createdAt         String
   historyJson       String      @default("[]")
   customer          Customer    @relation(fields: [customerId], references: [id])
@@ -679,11 +685,18 @@ model SalesOrder {
   notes               String?
   createdAt           String
   historyJson         String           @default("[]")
+  /// Status produksi diisi manual (belum ada modul produksi): Not Started | In Production | QC | Ready to Ship
+  productionStatus    String           @default("Not Started")
+  productionStart     String?
+  productionTarget    String?
+  productionNotes     String?
   customer            Customer         @relation(fields: [customerId], references: [id])
   quotation           Quotation?       @relation(fields: [quotationId], references: [id])
   items               SalesOrderItem[]
   invoices            Invoice[]
   contracts           Contract[]
+  salesShipments      SalesShipment[]
+  serviceJobs         ServiceJob[]
 }
 
 model SalesOrderItem {
@@ -1320,4 +1333,112 @@ model PreTripCheck {
   trip          Trip?   @relation(fields: [tripId], references: [id], onDelete: SetNull)
 
   @@index([vehicleId, at])
+}
+
+// ---------------------------------------------------------
+// CONTRACT & SHIPPING (Labtech) — pengiriman per Sales Order.
+// Aturan: shipment baru boleh dirilis setelah SO lunas (termasuk L/C), kecuali ada izin khusus
+// (exceptionStatus = Approved) yang disetujui Sales Manager di Dashboard Persetujuan.
+// ---------------------------------------------------------
+model SalesShipment {
+  id                   String       @id @default(cuid())
+  shipmentNo           String       @unique
+  salesOrderId         String
+  customerId           String
+  scope                String // Domestik | Ekspor
+  incoterm             String? // EXW | FOB | CIF | DAP | DDP | Franco
+  mode                 String // Laut | Udara | Darat
+  forwarder            String?
+  origin               String       @default("Batam")
+  destination          String
+  etd                  String?
+  eta                  String?
+  awbNo                String? // B/L atau AWB / no. resi
+  vessel               String?
+  containerNo          String?
+  packagesJson         String       @default("[]") // [{crateNo, contents, dims, grossKg, netKg}]
+  docsJson             String       @default("[]") // [{name, done}]
+  status               String // Draft | Ready | Shipped | Arrived | Cancelled
+  exceptionStatus      String? // Waiting Approval | Approved | Rejected
+  exceptionReason      String?
+  exceptionRequestedBy String?
+  exceptionDecidedBy   String?
+  exceptionDecidedAt   String?
+  exceptionNote        String?
+  shippedAt            String?
+  arrivedAt            String?
+  receivedBy           String?
+  notes                String?
+  createdBy            String
+  createdAt            String
+  historyJson          String       @default("[]")
+  salesOrder           SalesOrder   @relation(fields: [salesOrderId], references: [id])
+  customer             Customer     @relation(fields: [customerId], references: [id])
+  serviceJobs          ServiceJob[]
+}
+
+// ---------------------------------------------------------
+// TRAINING & CUSTOMER SERVICE (Labtech)
+// ServiceJob = instalasi/commissioning + training ke client (guru/dosen/teknisi) sampai BAST.
+// ServiceTicket = keluhan / perbaikan / spare part / klaim garansi dengan SLA respon.
+// ---------------------------------------------------------
+model ServiceJob {
+  id               String         @id @default(cuid())
+  jobNo            String         @unique
+  salesOrderId     String?
+  customerId       String
+  shipmentId       String?
+  type             String // Instalasi & Training | Training | Commissioning
+  mode             String         @default("Onsite") // Onsite | Online | Di Labtech Batam
+  location         String?
+  startDate        String?
+  endDate          String?
+  technicians      String?
+  trainerName      String?
+  topics           String?
+  status           String // Draft | Waiting Approval | Scheduled | In Progress | Completed | Cancelled
+  checklistJson    String         @default("[]") // [{item, serial, installed, tested, note}]
+  participantsJson String         @default("[]") // [{name, title, attended, pre, post}]
+  feedbackScore    Int?
+  feedbackNote     String?
+  bastNo           String?
+  bastDate         String?
+  approvedBy       String?
+  approvedAt       String?
+  decisionNote     String?
+  notes            String?
+  createdBy        String
+  createdAt        String
+  historyJson      String         @default("[]")
+  salesOrder       SalesOrder?    @relation(fields: [salesOrderId], references: [id])
+  customer         Customer       @relation(fields: [customerId], references: [id])
+  shipment         SalesShipment? @relation(fields: [shipmentId], references: [id])
+}
+
+model ServiceTicket {
+  id              String   @id @default(cuid())
+  ticketNo        String   @unique
+  customerId      String
+  salesOrderId    String?
+  category        String // Keluhan | Perbaikan | Spare Part | Klaim Garansi | Pertanyaan Teknis
+  priority        String // Low | Medium | High | Critical
+  channel         String // Telepon | Email | WhatsApp | Kunjungan | Portal
+  subject         String
+  description     String
+  productName     String?
+  serialNumber    String?
+  underWarranty   Boolean  @default(false)
+  status          String // Open | In Progress | Waiting Customer | Resolved | Closed
+  assignedTo      String?
+  reportedBy      String?
+  contactPhone    String?
+  responseDueAt   String // ISO datetime, dari SLA prioritas
+  firstResponseAt String?
+  resolvedAt      String?
+  resolution      String?
+  complaintId     String?
+  createdBy       String
+  createdAt       String
+  historyJson     String   @default("[]")
+  customer        Customer @relation(fields: [customerId], references: [id])
 }

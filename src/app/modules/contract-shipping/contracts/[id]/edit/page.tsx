@@ -1,16 +1,17 @@
+import { canSeeShipping } from "@/app/modules/sales/lib";
 import { notFound, redirect } from "next/navigation";
-import { getSalesAccess } from "../../../access";
-import { getContract, getContractFormData } from "../../../actions";
-import type { Clause } from "../../../documents/contractTemplates";
+import { getSalesAccess } from "@/app/modules/sales/access";
+import { getContract, getContractFormData } from "@/app/modules/sales/actions";
+import type { Clause } from "@/app/modules/sales/documents/contractTemplates";
 import ContractForm from "../../ContractForm";
 
 export default async function EditContractPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { access } = await getSalesAccess();
-  if (!access.canView) return null;
+  if (!canSeeShipping(access)) return null;
   const [c, formData] = await Promise.all([getContract(id), getContractFormData()]);
   if (!c) notFound();
-  if (c.status !== "Draft" || !access.canManage) redirect(`/modules/sales/contracts/${id}`);
+  if (c.status !== "Draft" || !access.canShipping) redirect(`/modules/contract-shipping/contracts/${id}`);
   return (
     <ContractForm
       {...formData}

@@ -3,8 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Clock, Plus } from "lucide-react";
-import { contractState, daysBetween, rupiah, today, type SalesAccess } from "../lib";
-import { StatusBadge, btnPrimary, inputCls } from "../ui";
+import { contractState, daysBetween, rupiah, today, type SalesAccess } from "@/app/modules/sales/lib";
+import { StatusBadge, btnPrimary, inputCls } from "@/app/modules/sales/ui";
 
 type Contract = {
   id: string; contractNo: string; type: string; title: string; startDate: string; endDate: string; value: number; visitsPerYear: number | null;
@@ -27,7 +27,7 @@ export default function ContractList({ contracts, access }: { contracts: Contrac
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-3 sm:items-center">
         <select aria-label="Filter kontrak" value={filter} onChange={e => setFilter(e.target.value)} className={`${inputCls} sm:w-56`}>{FILTERS.map(f => <option key={f}>{f}</option>)}</select>
         <p className="text-sm text-slate-500">“Expiring” = berakhir dalam 60 hari. Garansi dibuat otomatis saat BAST; AMC/Kalibrasi/Service butuh approval (maks. 7 hari kerja).</p>
-        {access.canManage && <Link href="/modules/sales/contracts/new" className={`${btnPrimary} sm:ml-auto justify-center shrink-0`}><Plus className="w-4 h-4" /> New Contract</Link>}
+        {access.canShipping && <Link href="/modules/contract-shipping/contracts/new" className={`${btnPrimary} sm:ml-auto justify-center shrink-0`}><Plus className="w-4 h-4" /> New Contract</Link>}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -37,7 +37,7 @@ export default function ContractList({ contracts, access }: { contracts: Contrac
           const left = daysBetween(today(), c.endDate);
           const lateApproval = c.state === "Waiting Approval" && c.approvalDueDate && today() > c.approvalDueDate;
           return (
-            <Link key={c.id} href={`/modules/sales/contracts/${c.id}`} className={`block bg-white rounded-xl border shadow-sm p-5 hover:border-blue-300 transition-colors ${c.state === "Expiring" || lateApproval ? "border-amber-300" : c.state === "Expired" ? "border-red-200" : "border-slate-200"}`}>
+            <Link key={c.id} href={`/modules/contract-shipping/contracts/${c.id}`} className={`block bg-white rounded-xl border shadow-sm p-5 hover:border-blue-300 transition-colors ${c.state === "Expiring" || lateApproval ? "border-amber-300" : c.state === "Expired" ? "border-red-200" : "border-slate-200"}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-slate-400">{c.contractNo} · {c.type}</p>

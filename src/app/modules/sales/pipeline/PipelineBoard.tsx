@@ -10,7 +10,7 @@ import { ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } fr
 
 type Opp = {
   id: string; opportunityNo: string; title: string; stage: string; source: string; estimatedValue: number; probability: number;
-  expectedCloseDate: string | null; salesName: string; lostReason: string | null; notes: string | null; customer: { id: string; name: string };
+  expectedCloseDate: string | null; tenderNo?: string | null; tenderDeadline?: string | null; salesName: string; lostReason: string | null; notes: string | null; customer: { id: string; name: string };
 };
 
 const COLUMN_ACCENT: Record<string, string> = {
@@ -61,6 +61,7 @@ export default function PipelineBoard({ opportunities, customers, canManage }: {
                       <span className="text-slate-500">{o.probability}%</span>
                     </div>
                     <p className="text-xs text-slate-500 mt-1">{o.salesName}{o.expectedCloseDate ? ` · target ${o.expectedCloseDate}` : ""}</p>
+                    {o.tenderDeadline && <p className={`text-xs mt-0.5 font-medium ${o.tenderDeadline < today() ? "text-slate-400" : "text-amber-700"}`}>Tender{o.tenderNo ? ` ${o.tenderNo}` : ""} · batas {o.tenderDeadline}</p>}
                     {o.lostReason && <p className="text-xs text-red-700 mt-1">Alasan: {o.lostReason}</p>}
                     {o.notes && !o.lostReason && <p className="text-xs text-slate-600 mt-1 line-clamp-2">{o.notes}</p>}
                     {canManage && (
@@ -84,6 +85,7 @@ export default function PipelineBoard({ opportunities, customers, canManage }: {
             exec(() => createOpportunity({
               title: String(f.get("title")), customerId: String(f.get("customerId")), source: String(f.get("source")),
               estimatedValue: Number(f.get("estimatedValue")) || 0, expectedCloseDate: String(f.get("expectedCloseDate") || "") || undefined, notes: String(f.get("notes") || "") || undefined,
+              tenderNo: String(f.get("tenderNo") || "") || undefined, tenderDeadline: String(f.get("tenderDeadline") || "") || undefined,
             }), () => setAdding(false));
           }}
         >
@@ -99,6 +101,10 @@ export default function PipelineBoard({ opportunities, customers, canManage }: {
             <div className="grid grid-cols-2 gap-4">
               <div><label className={labelCls} htmlFor="opp-src">Sumber</label><select id="opp-src" name="source" className={inputCls}>{SOURCES.map(s => <option key={s}>{s}</option>)}</select></div>
               <div><label className={labelCls} htmlFor="opp-close">Target closing</label><input id="opp-close" name="expectedCloseDate" type="date" min={today()} className={inputCls} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className={labelCls} htmlFor="opp-tno">No. paket tender (opsional)</label><input id="opp-tno" name="tenderNo" className={inputCls} placeholder="LPSE / UNGM ref" /></div>
+              <div><label className={labelCls} htmlFor="opp-tdl">Batas pemasukan</label><input id="opp-tdl" name="tenderDeadline" type="date" className={inputCls} /></div>
             </div>
             <div><label className={labelCls} htmlFor="opp-val">Estimasi nilai (Rp)</label><input id="opp-val" name="estimatedValue" type="number" min={0} step={1000} className={inputCls} /></div>
             <div><label className={labelCls} htmlFor="opp-notes">Catatan</label><textarea id="opp-notes" name="notes" rows={2} className={inputCls} /></div>

@@ -268,7 +268,7 @@ export async function runTool(name: string, args: Record<string, any>, ctx: Tool
       const saved = await createContract(result.draft, `AI Assistant, acuan: ${result.references.join(", ") || "pasal baku"}`);
       if (!saved.success || !saved.id) return { error: saved.success ? "Gagal menyimpan draft." : saved.message };
       const created = await prisma.contract.findUniqueOrThrow({ where: { id: saved.id }, select: { contractNo: true } });
-      ctx.emit({ t: "navigate", path: `/modules/sales/contracts/${saved.id}`, label: created.contractNo });
+      ctx.emit({ t: "navigate", path: `/modules/contract-shipping/contracts/${saved.id}`, label: created.contractNo });
       return {
         created: created.contractNo, status: "Draft", customer: matches[0].name, type: result.draft.type, value: result.draft.value,
         period: `${result.draft.startDate} s/d ${result.draft.endDate}`, items: result.draft.coveredItems.map(i => `${i.product} (S/N ${i.serialNumber})`),

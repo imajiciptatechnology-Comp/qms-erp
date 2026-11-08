@@ -5,10 +5,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Ban, Check, Clock, Pencil, Receipt, RefreshCw, Send, Upload, X, XCircle } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
-import { decideContract, markContractSent, renewContract, submitContract, terminateContract, uploadSignedContract } from "../../actions";
-import { visitSchedule, type Clause } from "../../documents/contractTemplates";
-import { contractBillingPeriods, contractState, daysBetween, invoiceState, rupiah, today, type SalesAccess } from "../../lib";
-import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, labelCls, useAction } from "../../ui";
+import { decideContract, markContractSent, renewContract, submitContract, terminateContract, uploadSignedContract } from "@/app/modules/sales/actions";
+import { visitSchedule, type Clause } from "@/app/modules/sales/documents/contractTemplates";
+import { contractBillingPeriods, contractState, daysBetween, invoiceState, rupiah, today, type SalesAccess } from "@/app/modules/sales/lib";
+import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, labelCls, useAction } from "@/app/modules/sales/ui";
 
 type C = {
   id: string; contractNo: string; type: string; title: string; startDate: string; endDate: string; value: number; visitsPerYear: number | null;
@@ -34,7 +34,7 @@ export default function ContractDetail({ c, access }: { c: C; access: SalesAcces
   const clauses = JSON.parse(c.clausesJson || "[]") as Clause[];
   const schedule = visitSchedule(c.startDate, c.endDate, c.visitsPerYear);
   const isWarranty = c.type === "Garansi";
-  const m = access.canManage;
+  const m = access.canShipping;
   const lateApproval = c.status === "Waiting Approval" && !!c.approvalDueDate && today() > c.approvalDueDate;
   const billable = !isWarranty && c.value > 0 && ["Approved", "Sent", "Active"].includes(c.status);
   const periods = billable ? contractBillingPeriods(c) : [];
@@ -49,14 +49,14 @@ export default function ContractDetail({ c, access }: { c: C; access: SalesAcces
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
-          <Link href="/modules/sales/contracts" className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Contracts</Link>
+          <Link href="/modules/contract-shipping/contracts" className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Contracts</Link>
           <h2 className="text-xl font-bold text-slate-800 mt-1 flex flex-wrap items-center gap-2">{c.contractNo} <StatusBadge status={state} /></h2>
           <p className="text-sm text-slate-500">{c.title} · <Link href={`/modules/sales/customers/${c.customer.id}`} className="hover:underline">{c.customer.name}</Link></p>
         </div>
         <div className="flex flex-wrap gap-2">
           <DocLinks kind="contract" id={c.id} label={isWarranty ? "Sertifikat" : "Perjanjian"} formats={isWarranty ? ["pdf"] : ["pdf", "docx"]} />
           {c.status === "Draft" && m && <>
-            <Link href={`/modules/sales/contracts/${c.id}/edit`} className={btnSecondary}><Pencil className="w-4 h-4" /> Edit</Link>
+            <Link href={`/modules/contract-shipping/contracts/${c.id}/edit`} className={btnSecondary}><Pencil className="w-4 h-4" /> Edit</Link>
             <button className={btnPrimary} disabled={pending} onClick={() => exec(() => submitContract(c.id))}><Send className="w-4 h-4" /> Ajukan persetujuan</button>
           </>}
           {c.status === "Waiting Approval" && access.canApprove && <>
@@ -66,11 +66,11 @@ export default function ContractDetail({ c, access }: { c: C; access: SalesAcces
           {c.status === "Approved" && m && <button className={btnSecondary} disabled={pending} onClick={() => exec(() => markContractSent(c.id))}><Send className="w-4 h-4" /> Tandai terkirim</button>}
           {["Approved", "Sent"].includes(c.status) && m && <button className={btnPrimary} onClick={() => { upload.setError(null); setUploadOpen(true); }}><Upload className="w-4 h-4" /> Upload scan bertanda tangan</button>}
           {["Active", "Expired"].includes(c.status) && m && !c.renewal && (
-            <button className={btnSecondary} disabled={pending} onClick={() => exec(() => renewContract(c.id), id => id && router.push(`/modules/sales/contracts/${id}`))}>
+            <button className={btnSecondary} disabled={pending} onClick={() => exec(() => renewContract(c.id), id => id && router.push(`/modules/contract-shipping/contracts/${id}`))}>
               <RefreshCw className="w-4 h-4" /> {isWarranty ? "Lanjutkan ke AMC" : "Perpanjang"}
             </button>
           )}
-          {c.renewal && <Link href={`/modules/sales/contracts/${c.renewal.id}`} className={btnSecondary}><RefreshCw className="w-4 h-4" /> Perpanjangan: {c.renewal.contractNo}</Link>}
+          {c.renewal && <Link href={`/modules/contract-shipping/contracts/${c.renewal.id}`} className={btnSecondary}><RefreshCw className="w-4 h-4" /> Perpanjangan: {c.renewal.contractNo}</Link>}
           {access.canApprove && ["Active", "Approved", "Sent"].includes(c.status) && (
             <button className={btnDanger} disabled={pending} onClick={() => { const r = prompt("Alasan menghentikan kontrak:"); if (r) exec(() => terminateContract(c.id, r)); }}><Ban className="w-4 h-4" /> Hentikan</button>
           )}
@@ -153,7 +153,7 @@ export default function ContractDetail({ c, access }: { c: C; access: SalesAcces
               <InfoRow label="Persetujuan">{c.approvedBy ? `${c.approvedBy} (${c.approvedAt})` : null}</InfoRow>
               <InfoRow label="Scan bertanda tangan">{c.signedFileUrl ? <a href={c.signedFileUrl} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">Lihat file</a> : null}</InfoRow>
               {c.salesOrder && <InfoRow label="Sales Order"><Link href={`/modules/sales/orders/${c.salesOrder.id}`} className="text-blue-700 hover:underline">{c.salesOrder.soNo}</Link></InfoRow>}
-              {c.renewedFrom && <InfoRow label="Perpanjangan dari"><Link href={`/modules/sales/contracts/${c.renewedFrom.id}`} className="text-blue-700 hover:underline">{c.renewedFrom.contractNo}</Link></InfoRow>}
+              {c.renewedFrom && <InfoRow label="Perpanjangan dari"><Link href={`/modules/contract-shipping/contracts/${c.renewedFrom.id}`} className="text-blue-700 hover:underline">{c.renewedFrom.contractNo}</Link></InfoRow>}
               {c.picName && <InfoRow label="PIC">{c.picName}</InfoRow>}
               {c.notes && <InfoRow label="Catatan">{c.notes}</InfoRow>}
             </dl>

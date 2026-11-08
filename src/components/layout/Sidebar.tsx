@@ -32,6 +32,8 @@ import {
   Route,
   ShieldCheck,
   CalendarClock,
+  Ship,
+  Headset,
   X
 } from "lucide-react";
 
@@ -56,7 +58,10 @@ export const MODULES = [
   { id: "welding", name: "Welding Management", path: "/modules/welding", icon: Flame },
   { id: "hse", name: "HSE", path: "/modules/hse", icon: HardHat },
   { id: "moc", name: "Management of Change", path: "/modules/moc", icon: RefreshCw },
-  { id: "sales", name: "Sales & Marketing", path: "/modules/sales", icon: Briefcase },
+  // Grup "Labtech" punya menu sendiri (LABTECH_MENU); entri ini untuk centang akses di Settings → Roles.
+  { id: "sales", name: "Sales & Marketing", path: "/modules/sales", icon: Briefcase, group: "labtech" },
+  { id: "contract_shipping", name: "Contract & Shipping", path: "/modules/contract-shipping", icon: Ship, group: "labtech" },
+  { id: "customer_service", name: "Training & Customer Service", path: "/modules/customer-service", icon: Headset, group: "labtech" },
   // Grup "Logistik" punya menu sendiri (LOGISTICS_MENU); entri ini untuk centang akses di Settings → Roles.
   { id: "logistics", name: "Logistics (Truck Charter)", path: "/modules/logistics", icon: Truck, group: "logistics" },
 ];
@@ -74,6 +79,16 @@ export const LOGISTICS_MENU = [
   { id: "log-tracking", name: "Fleet Tracking", path: "/modules/logistics/tracking", icon: MapPinned, perm: "logistics" },
 ];
 
+/**
+ * Menu grup "Labtech" (PT Labtech Penta International). perms = salah satu izin ini cukup.
+ * Sales Manager (sales_approve) ikut melihat dua modul lain karena persetujuannya ada di sana.
+ */
+export const LABTECH_MENU = [
+  { id: "lt-sales", name: "Sales & Marketing", path: "/modules/sales", icon: Briefcase, perms: ["sales", "finance"] },
+  { id: "lt-contract", name: "Contract & Shipping", path: "/modules/contract-shipping", icon: Ship, perms: ["contract_shipping", "sales_approve"] },
+  { id: "lt-service", name: "Training & Customer Service", path: "/modules/customer-service", icon: Headset, perms: ["customer_service", "sales_approve"] },
+];
+
 export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClose }: {
   user: any;
   rolesConfig?: any[];
@@ -89,8 +104,9 @@ export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClos
     if (roleConfig.permissions.includes("all")) return true;
     return roleConfig.permissions.includes(modId);
   };
-  // Role khusus logistik (tanpa akses modul QMS mana pun) tidak perlu melihat daftar modul QMS yang terkunci.
-  const showQms = MODULES.some(m => !("group" in m) && hasAccess(m.id)) || !LOGISTICS_MENU.some(m => hasAccess(m.perm));
+  const labtechItems = LABTECH_MENU.filter(m => m.perms.some(hasAccess));
+  // Role khusus logistik / Labtech (tanpa akses modul QMS mana pun) tidak perlu melihat daftar modul QMS yang terkunci.
+  const showQms = MODULES.some(m => !("group" in m) && hasAccess(m.id)) || (!LOGISTICS_MENU.some(m => hasAccess(m.perm)) && labtechItems.length === 0);
   const logisticsItems = LOGISTICS_MENU.filter(m => m.perm === "logistics_driver"
     ? hasAccess(m.perm) && (!hasAccess("logistics") || user?.role === "Super Admin")
     : hasAccess(m.perm));
@@ -161,9 +177,34 @@ export default function Sidebar({ user, rolesConfig = [], isOpen = false, onClos
           );
         })}
 
-        {logisticsItems.length > 0 && (
+        {labtechItems.length > 0 && (
           <>
             <div className={`text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-3 ${showQms ? "mt-5" : ""}`}>
+              Labtech
+            </div>
+            {labtechItems.map((mod) => {
+              const isActive = pathname === mod.path || pathname.startsWith(mod.path + "/");
+              return (
+                <Link
+                  key={mod.id}
+                  href={mod.path}
+                  className={`relative flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
+                    ${isActive ? "bg-blue-600 text-white shadow-sm shadow-blue-950/30" : "hover:bg-slate-800 hover:text-white"}`}
+                >
+                  {isActive && (
+                    <span className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-blue-300" />
+                  )}
+                  <mod.icon className={`w-5 h-5 shrink-0 ${isActive ? "text-white" : "text-slate-400 group-hover:text-blue-400"}`} />
+                  <span className="text-sm font-medium truncate">{mod.name}</span>
+                </Link>
+              );
+            })}
+          </>
+        )}
+
+        {logisticsItems.length > 0 && (
+          <>
+            <div className={`text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2 px-3 ${showQms || labtechItems.length > 0 ? "mt-5" : ""}`}>
               Logistik
             </div>
             {logisticsItems.map((mod) => {

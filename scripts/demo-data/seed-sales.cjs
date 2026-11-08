@@ -128,6 +128,10 @@ async function clearSales({ quiet = false } = {}) {
   const starts = { id: { startsWith: PREFIX } };
   // Anak dulu; item & pembayaran ikut terhapus lewat cascade.
   const results = {
+    // Modul Labtech (Contract & Shipping, Training & CS) merujuk SO/customer — hapus lebih dulu.
+    serviceTicket: await prisma.serviceTicket.deleteMany({ where: starts }),
+    serviceJob: await prisma.serviceJob.deleteMany({ where: starts }),
+    salesShipment: await prisma.salesShipment.deleteMany({ where: starts }),
     contract: await prisma.contract.deleteMany({ where: starts }),
     invoice: await prisma.invoice.deleteMany({ where: starts }),
     salesOrder: await prisma.salesOrder.deleteMany({ where: starts }),

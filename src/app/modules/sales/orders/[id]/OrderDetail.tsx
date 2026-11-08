@@ -1,12 +1,10 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Ban, CheckSquare, FileText, Receipt, Square, Truck, X } from "lucide-react";
-import ModalShell from "@/components/ui/ModalShell";
+import { ArrowLeft, Ban, CheckSquare, FileText, Lock, Receipt, Square, Truck } from "lucide-react";
 import { advanceSalesOrder, cancelSalesOrder, createInvoiceFromSchedule, toggleContractReview } from "../../actions";
-import { contractState, invoiceState, rupiah, today, type SalesAccess } from "../../lib";
-import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
+import { JOB_STATUS_LABEL, PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, contractState, invoiceState, orderPaidStatus, rupiah, type SalesAccess } from "../../lib";
+import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, useAction } from "../../ui";
 
 type SO = {
   id: string; soNo: string; customerPoNo: string; customerPoDate: string; customerPoFile: string | null; orderDate: string; status: string;
@@ -16,23 +14,25 @@ type SO = {
   items: { id: string; description: string; qty: number; unit: string; unitPrice: number; lineTotal: number; serialNumbers: string | null }[];
   invoices: { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string }[];
   contracts: { id: string; contractNo: string; type: string; title: string; endDate: string; status: string }[];
+  productionStatus: string; productionTarget: string | null;
+  salesShipments: { id: string; shipmentNo: string; status: string; mode: string; destination: string; exceptionStatus: string | null }[];
+  serviceJobs: { id: string; jobNo: string; status: string; type: string; startDate: string | null }[];
 };
 
 const STEPS = ["Contract Review", "Confirmed", "In Delivery", "Installed", "Completed"];
-const NEXT_LABEL: Record<string, string> = { "Contract Review": "Konfirmasi order", Confirmed: "Mulai pengiriman", "In Delivery": "Input BAST instalasi", Installed: "Selesaikan order" };
+// Confirmed → In Delivery lewat modul Contract & Shipping; In Delivery → Installed lewat BAST di modul Training & CS.
+const NEXT_LABEL: Record<string, string> = { "Contract Review": "Konfirmasi order", Installed: "Selesaikan order" };
 
 export default function OrderDetail({ so, access }: { so: SO; access: SalesAccess }) {
   const { pending, error, exec } = useAction();
-  const bast = useAction();
-  const [bastOpen, setBastOpen] = useState(false);
   const review = JSON.parse(so.contractReviewJson) as { item: string; ok: boolean; reviewedBy?: string; date?: string }[];
   const schedule = JSON.parse(so.paymentScheduleJson) as { label: string; percent: number; trigger: string }[];
   const stepIdx = STEPS.indexOf(so.status);
   const m = access.canManage;
-  const paid = so.invoices.filter(i => i.status !== "Cancelled").reduce((s, i) => s + i.paidAmount, 0);
+  const pay = orderPaidStatus(so);
+  const paid = pay.paid;
 
   function advance() {
-    if (so.status === "In Delivery") { bast.setError(null); setBastOpen(true); return; }
     exec(() => advanceSalesOrder(so.id));
   }
   function cancel() {
@@ -137,6 +137,36 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
         </div>
 
         <div className="space-y-6">
+          {!["Contract Review", "Cancelled"].includes(so.status) && (
+            <Card title="Produksi, pengiriman & instalasi">
+              <dl className="space-y-3">
+                <InfoRow label="Produksi">
+                  <span className="flex items-center gap-2"><StatusBadge status={so.productionStatus} /> {PRODUCTION_LABEL[so.productionStatus]}{so.productionTarget ? ` · target ${so.productionTarget}` : ""}</span>
+                </InfoRow>
+                <InfoRow label="Gerbang pelunasan">
+                  {pay.fullyPaid
+                    ? <span className="text-emerald-700 font-medium">Lunas — boleh dikirim</span>
+                    : so.salesShipments.some(s => s.exceptionStatus === "Approved")
+                      ? <span className="text-amber-800 font-medium">Izin khusus kirim sebelum lunas · sisa {rupiah(pay.remaining)}</span>
+                      : <span className="text-red-700 font-medium inline-flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden /> Sisa {rupiah(pay.remaining)} harus lunas sebelum kirim</span>}
+                </InfoRow>
+                <InfoRow label="Shipment">
+                  {so.salesShipments.length ? (
+                    <ul className="space-y-1">
+                      {so.salesShipments.map(s => <li key={s.id}><Link href={`/modules/contract-shipping/shipments/${s.id}`} className="text-blue-700 hover:underline">{s.shipmentNo}</Link> <span className="text-slate-500">· {SHIPMENT_STATUS_LABEL[s.status]} · {s.mode} → {s.destination}</span></li>)}
+                    </ul>
+                  ) : so.status === "Confirmed" ? <Link href={`/modules/contract-shipping/shipments/new?so=${so.id}`} className="text-blue-700 hover:underline">Siapkan shipment</Link> : null}
+                </InfoRow>
+                <InfoRow label="Instalasi & training">
+                  {so.serviceJobs.length ? (
+                    <ul className="space-y-1">
+                      {so.serviceJobs.map(j => <li key={j.id}><Link href={`/modules/customer-service/jobs/${j.id}`} className="text-blue-700 hover:underline">{j.jobNo}</Link> <span className="text-slate-500">· {JOB_STATUS_LABEL[j.status] ?? j.status}{j.startDate ? ` · ${j.startDate}` : ""}</span></li>)}
+                    </ul>
+                  ) : <span className="text-slate-500">Dibuat otomatis saat barang tiba di client</span>}
+                </InfoRow>
+              </dl>
+            </Card>
+          )}
           <Card title="Info order">
             <dl className="space-y-3">
               <InfoRow label="Tanggal PO">{so.customerPoDate}</InfoRow>
@@ -165,40 +195,6 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
         </div>
       </div>
 
-      <ModalShell isOpen={bastOpen} onClose={() => setBastOpen(false)} size="max-w-xl">
-        <form onSubmit={e => {
-          e.preventDefault();
-          const f = new FormData(e.currentTarget);
-          const serials = Object.fromEntries(so.items.map(it => [it.id, String(f.get(`sn-${it.id}`) || "")]));
-          bast.exec(() => advanceSalesOrder(so.id, { bastNo: String(f.get("bastNo")), bastDate: String(f.get("bastDate")), serials }), () => setBastOpen(false));
-        }}>
-          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h2 id="modal-title" className="font-bold text-slate-800">BAST instalasi</h2>
-            <button type="button" onClick={() => setBastOpen(false)} aria-label="Tutup" className="p-1 text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-          </div>
-          <div className="p-6 space-y-4 overflow-y-auto">
-            <div className="grid grid-cols-2 gap-4">
-              <div><label className={labelCls} htmlFor="bast-no">No. BAST</label><input id="bast-no" name="bastNo" required className={inputCls} /></div>
-              <div><label className={labelCls} htmlFor="bast-date">Tanggal BAST</label><input id="bast-date" name="bastDate" type="date" required max={today()} defaultValue={today()} className={inputCls} /></div>
-            </div>
-            <fieldset className="space-y-3">
-              <legend className={labelCls}>Nomor seri alat (pisahkan dengan koma)</legend>
-              {so.items.map(it => (
-                <div key={it.id}>
-                  <label htmlFor={`sn-${it.id}`} className="text-sm text-slate-700">{it.description} <span className="text-slate-500">({it.qty} {it.unit})</span></label>
-                  <input id={`sn-${it.id}`} name={`sn-${it.id}`} defaultValue={it.serialNumbers ?? ""} className={`${inputCls} mt-1`} />
-                </div>
-              ))}
-            </fieldset>
-            <p className="text-xs text-slate-500">Setelah disimpan, kontrak garansi dibuat otomatis untuk alat yang bergaransi.</p>
-            <ErrorNote error={bast.error} />
-          </div>
-          <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
-            <button type="button" className={btnSecondary} onClick={() => setBastOpen(false)}>Batal</button>
-            <button type="submit" className={btnPrimary} disabled={bast.pending}>{bast.pending ? "Menyimpan…" : "Simpan BAST"}</button>
-          </div>
-        </form>
-      </ModalShell>
     </div>
   );
 }

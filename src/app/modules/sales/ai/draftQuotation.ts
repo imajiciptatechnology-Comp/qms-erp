@@ -69,7 +69,7 @@ export async function generateQuotationDraft(input: { customerId: string; reques
     ...(i === 0 ? { introText: q.introText, closingText: q.closingText } : {}),
   }));
 
-  const system = `Kamu adalah asisten sales PT Labtech Penta International (distributor alat laboratorium, B2B, Indonesia).
+  const system = `Kamu adalah asisten sales PT Labtech Penta International (produsen peralatan praktik/trainer pendidikan vokasi & teknik, pabrik di Batam; B2B ke SMK, politeknik, universitas, pemerintah, dan lembaga internasional).
 Tugasmu: menyusun DRAFT surat penawaran harga dalam Bahasa Indonesia formal, meniru gaya bahasa, struktur, dan syarat dari contoh penawaran sebelumnya.
 
 Aturan:

@@ -55,7 +55,7 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
               <InfoRow label="Jatuh tempo">{inv.dueDate}{state === "Overdue" ? ` — ${daysBetween(inv.dueDate, today())} hari lewat` : ""}</InfoRow>
               <InfoRow label="Referensi">
                 {inv.salesOrder ? <Link href={`/modules/sales/orders/${inv.salesOrder.id}`} className="text-blue-700 hover:underline">{inv.salesOrder.soNo} (PO {inv.salesOrder.customerPoNo})</Link>
-                  : inv.contract ? <Link href={`/modules/sales/contracts/${inv.contract.id}`} className="text-blue-700 hover:underline">{inv.contract.contractNo}{inv.periodLabel ? ` · ${inv.periodLabel}` : ""}</Link>
+                  : inv.contract ? <Link href={`/modules/contract-shipping/contracts/${inv.contract.id}`} className="text-blue-700 hover:underline">{inv.contract.contractNo}{inv.periodLabel ? ` · ${inv.periodLabel}` : ""}</Link>
                   : "Invoice manual"}
               </InfoRow>
             </dl>
@@ -155,7 +155,7 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
               <div><label className={labelCls} htmlFor="pay-date">Tanggal terima</label><input id="pay-date" name="paymentDate" type="date" required max={today()} defaultValue={today()} className={inputCls} /></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className={labelCls} htmlFor="pay-method">Metode</label><select id="pay-method" name="method" className={inputCls}><option>Transfer</option><option>Giro</option><option>Tunai</option></select></div>
+              <div><label className={labelCls} htmlFor="pay-method">Metode</label><select id="pay-method" name="method" className={inputCls}><option>Transfer</option><option>L/C</option><option>Giro</option><option>Tunai</option></select></div>
               <div><label className={labelCls} htmlFor="pay-ref">Referensi</label><input id="pay-ref" name="reference" className={inputCls} placeholder="mis. TRF BNI 1103" /></div>
             </div>
             <div><label className={labelCls} htmlFor="pay-proof">Bukti transfer (opsional)</label><input id="pay-proof" name="proof" type="file" accept=".pdf,image/*" className="block w-full text-sm text-slate-600 file:mr-3 file:px-3 file:py-1.5 file:rounded-md file:border-0 file:bg-slate-100 file:text-slate-700" /></div>
