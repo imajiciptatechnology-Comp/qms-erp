@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Factory, FileSignature, Lock, Ship } from "lucide-react";
 import { getSalesAccess } from "@/app/modules/sales/access";
-import { PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, canSeeShipping, contractState, rupiah } from "@/app/modules/sales/lib";
+import { PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, canSeeShipping, contractState, money } from "@/app/modules/sales/lib";
 import { Card, StatCard, StatusBadge } from "@/app/modules/sales/ui";
 import { getShippingOverview } from "./actions";
 
@@ -33,7 +33,7 @@ export default async function ContractShippingOverview() {
               {readyUnpaid.map(o => (
                 <li key={o.id} className="py-2.5 flex items-center justify-between gap-4 text-sm">
                   <span><Link href={`/modules/sales/orders/${o.id}`} className="font-semibold text-slate-800 hover:underline">{o.soNo}</Link><span className="block text-xs text-slate-500">{o.customer.name}</span></span>
-                  <span className="text-right"><span className="font-semibold text-red-700 tabular-nums">sisa {rupiah(o.payment.remaining)}</span><span className="block text-xs text-slate-500">dari {rupiah(o.total)}</span></span>
+                  <span className="text-right"><span className="font-semibold text-red-700 tabular-nums">sisa {money(o.payment.remaining, o.currency)}</span><span className="block text-xs text-slate-500">dari {money(o.total, o.currency)}</span></span>
                 </li>
               ))}
             </ul>

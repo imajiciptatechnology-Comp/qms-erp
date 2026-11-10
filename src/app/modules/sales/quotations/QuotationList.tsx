@@ -6,10 +6,10 @@ import { useRouter } from "next/navigation";
 import { FileText, Plus, Search } from "lucide-react";
 import EmptyTableRow from "@/components/ui/EmptyTableRow";
 import TableFooter from "@/components/ui/TableFooter";
-import { rupiah } from "../lib";
+import { money } from "../lib";
 import { StatusBadge, btnPrimary, inputCls } from "../ui";
 
-type Row = { id: string; quotationNo: string; revision: number; date: string; validUntil: string; status: string; subject: string; total: number; salesName: string; customer: { name: string } };
+type Row = { id: string; quotationNo: string; revision: number; date: string; validUntil: string; status: string; subject: string; total: number; currency: string; salesName: string; customer: { name: string } };
 
 const STATUSES = ["Draft", "Waiting Approval", "Approved", "Sent", "Accepted", "Rejected", "Superseded"];
 
@@ -66,7 +66,7 @@ export default function QuotationList({ quotations, canManage }: { quotations: R
                     <p className="text-slate-700">{r.date}</p>
                     <p className="text-xs text-slate-500">berlaku s/d {r.validUntil}</p>
                   </td>
-                  <td className="px-6 py-4 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">{rupiah(r.total)}</td>
+                  <td className="px-6 py-4 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">{money(r.total, r.currency)}</td>
                   <td className="px-6 py-4"><StatusBadge status={r.status} /></td>
                 </tr>
               )) : <EmptyTableRow colSpan={5} icon={<FileText className="w-12 h-12 text-slate-200" />} title="Tidak ada penawaran" subtitle="Ubah filter atau buat penawaran baru." />}

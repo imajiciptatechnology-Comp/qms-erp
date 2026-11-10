@@ -34,3 +34,50 @@ export const bulanTahun = (iso: string) => {
 
 /** Nama file aman untuk Windows. */
 export const safeName = (s: string) => s.replace(/\//g, "-").replace(/[\\:*?"<>|]/g, "");
+
+// ---------------------------------------------------------
+// Dokumen ekspor (bahasa Inggris)
+// ---------------------------------------------------------
+
+const ONES = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+/** 12345 → "twelve thousand three hundred forty-five". */
+export function numberToWords(n: number): string {
+  n = Math.floor(Math.abs(n));
+  if (n < 20) return ONES[n];
+  if (n < 100) return `${TENS[Math.floor(n / 10)]}${n % 10 ? `-${ONES[n % 10]}` : ""}`;
+  if (n < 1000) return `${ONES[Math.floor(n / 100)]} hundred${n % 100 ? ` ${numberToWords(n % 100)}` : ""}`;
+  const units: [number, string][] = [[1e12, "trillion"], [1e9, "billion"], [1e6, "million"], [1e3, "thousand"]];
+  for (const [size, name] of units) {
+    if (n >= size) return `${numberToWords(Math.floor(n / size))} ${name}${n % size ? ` ${numberToWords(n % size)}` : ""}`;
+  }
+  return "";
+}
+
+const CURRENCY_WORDS: Record<string, [string, string]> = {
+  USD: ["US Dollars", "cents"], EUR: ["Euros", "cents"], SGD: ["Singapore Dollars", "cents"], IDR: ["Indonesian Rupiah", ""],
+};
+
+/** Terbilang sesuai valuta & bahasa: "Say: US Dollars twelve thousand ... and 50/100 only". */
+export function amountInWords(n: number, currency = "IDR", lang: "id" | "en" = "id") {
+  if (lang === "id" && currency === "IDR") return `Terbilang: ${terbilangRupiah(n)}`;
+  const whole = Math.floor(Math.abs(n));
+  const cents = Math.round((Math.abs(n) - whole) * 100);
+  if (lang === "id") {
+    const name = { USD: "dolar Amerika Serikat", EUR: "euro", SGD: "dolar Singapura" }[currency] ?? currency;
+    const text = `${terbilang(whole) || "nol"} ${name}${cents ? ` ${terbilang(cents)} sen` : ""}`;
+    return `Terbilang: ${text.replace(/^./, c => c.toUpperCase())}`;
+  }
+  const [major] = CURRENCY_WORDS[currency] ?? [currency, "cents"];
+  const words = numberToWords(whole) || "zero";
+  return `Say: ${major} ${words}${currency !== "IDR" ? ` and ${String(cents).padStart(2, "0")}/100` : ""} only`;
+}
+
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+/** 2026-11-10 → "10 November 2026" */
+export const dateEn = (iso?: string | null) => {
+  if (!iso) return "-";
+  const [y, m, d] = iso.split("-").map(Number);
+  return `${d} ${MONTHS[m - 1]} ${y}`;
+};

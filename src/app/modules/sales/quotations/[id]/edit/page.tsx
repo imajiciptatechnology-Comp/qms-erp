@@ -25,6 +25,7 @@ export default async function EditQuotationPage({ params }: { params: Promise<{ 
         customerId: q.customerId, opportunityId: q.opportunityId, date: q.date, validUntil: q.validUntil, subject: q.subject, attention: q.attention ?? "",
         introText: q.introText ?? "", closingText: q.closingText ?? "", discountPercent: q.discountPercent, paymentTerms: q.paymentTerms ?? "",
         deliveryTerms: q.deliveryTerms ?? "", warrantyTerms: q.warrantyTerms ?? "", notes: q.notes ?? "",
+        currency: q.currency, exchangeRate: q.exchangeRate, taxPercent: q.taxPercent,
         items: q.items.map(i => ({ productId: i.productId, description: i.description, specs: i.specs ?? "", qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, discountPercent: i.discountPercent })),
       }}
     />

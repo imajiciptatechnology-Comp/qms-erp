@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { getCurrentUser, type CurrentUser } from "@/app/actions/auth";
 import { getRolesConfig } from "@/lib/authServer";
 import { notifyPermission } from "@/lib/notificationStore";
-import { PERM, PRODUCTION_LABEL, PRODUCTION_STATUSES, canSeeShipping, defaultShipmentDocs, orderPaidStatus, salesAccess, today, type CratePackage } from "@/app/modules/sales/lib";
+import { PERM, PRODUCTION_LABEL, PRODUCTION_STATUSES, canSeeShipping, defaultShipmentDocs, orderPaidStatus, salesAccess, today, type CratePackage, money } from "@/app/modules/sales/lib";
 import { addHistory, firstHistory, nextDocNo } from "@/app/modules/sales/server";
 
 type Result = { success: true; id?: string } | { success: false; message: string };
@@ -74,7 +74,7 @@ export async function getShipment(id: string) {
     where: { id },
     include: {
       customer: true,
-      salesOrder: { include: { items: { orderBy: { sortOrder: "asc" } }, invoices: { select: { id: true, invoiceNo: true, termLabel: true, total: true, paidAmount: true, status: true, dueDate: true } } } },
+      salesOrder: { include: { items: { orderBy: { sortOrder: "asc" } }, invoices: { select: { id: true, invoiceNo: true, termLabel: true, total: true, paidAmount: true, status: true, dueDate: true, currency: true } } } },
       serviceJobs: { select: { id: true, jobNo: true, status: true, type: true } },
     },
   });
@@ -92,7 +92,7 @@ export async function getShipmentFormData() {
   });
   return orders.map(o => ({
     id: o.id, soNo: o.soNo, customerPoNo: o.customerPoNo, customer: o.customer.name, deliveryAddress: o.deliveryAddress ?? o.customer.address ?? o.customer.city ?? "",
-    productionStatus: o.productionStatus, payment: orderPaidStatus(o),
+    productionStatus: o.productionStatus, payment: orderPaidStatus(o), currency: o.currency,
     items: o.items.map(i => ({ description: i.description, qty: i.qty, unit: i.unit })),
   }));
 }
@@ -235,7 +235,7 @@ async function assertCanShip(shipmentId: string) {
   const s = await prisma.salesShipment.findUniqueOrThrow({ where: { id: shipmentId }, include: { salesOrder: { include: { invoices: true } } } });
   const pay = orderPaidStatus(s.salesOrder);
   if (!pay.fullyPaid && s.exceptionStatus !== "Approved") {
-    throw new Error(`Order belum lunas (sisa Rp ${pay.remaining.toLocaleString("id-ID")}). Lunasi dulu, atau ajukan izin khusus ke Sales Manager.`);
+    throw new Error(`Order belum lunas (sisa ${money(pay.remaining, s.salesOrder.currency)}). Lunasi dulu, atau ajukan izin khusus ke Sales Manager.`);
   }
   if (s.salesOrder.productionStatus !== "Ready to Ship") throw new Error("Produksi belum berstatus Siap kirim.");
   return s;

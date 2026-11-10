@@ -5,12 +5,12 @@ import Link from "next/link";
 import { ArrowLeft, Ban, Banknote, Loader2, MailWarning, X } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
 import { cancelInvoice, createPaymentReminder, recordPayment, updateInvoiceTax } from "../../actions";
-import { daysBetween, invoiceState, rupiah, today, type SalesAccess } from "../../lib";
+import { daysBetween, invoiceState, today, type SalesAccess, money } from "../../lib";
 import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
 
 type Inv = {
   id: string; invoiceNo: string; termLabel: string; termPercent: number | null; invoiceDate: string; dueDate: string; subtotal: number; taxAmount: number; total: number;
-  paidAmount: number; status: string; fakturPajakNo: string | null; historyJson: string;
+  paidAmount: number; status: string; fakturPajakNo: string | null; historyJson: string; currency: string; exchangeRate: number; taxPercent: number;
   customer: { id: string; name: string; npwp: string | null; address: string | null; paymentTerms: string };
   salesOrder: { id: string; soNo: string; customerPoNo: string } | null;
   contract: { id: string; contractNo: string; title: string } | null;
@@ -64,17 +64,17 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
                 <thead className="text-left text-slate-500 text-xs uppercase"><tr><th className="pb-2 font-semibold">Item</th><th className="pb-2 font-semibold text-right">Qty</th><th className="pb-2 font-semibold text-right">Jumlah</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                   {inv.items.map(it => (
-                    <tr key={it.id}><td className="py-2 pr-4 text-slate-800">{it.description}</td><td className="py-2 text-right whitespace-nowrap">{it.qty} {it.unit}</td><td className="py-2 text-right tabular-nums whitespace-nowrap">{rupiah(it.lineTotal)}</td></tr>
+                    <tr key={it.id}><td className="py-2 pr-4 text-slate-800">{it.description}</td><td className="py-2 text-right whitespace-nowrap">{it.qty} {it.unit}</td><td className="py-2 text-right tabular-nums whitespace-nowrap">{money(it.lineTotal, inv.currency)}</td></tr>
                   ))}
                 </tbody>
               </table>
             )}
             <dl className="ml-auto w-full sm:w-80 mt-5 space-y-1.5 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">DPP{inv.termPercent ? ` (${inv.termPercent}%)` : ""}</dt><dd className="tabular-nums">{rupiah(inv.subtotal)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">PPN</dt><dd className="tabular-nums">{rupiah(inv.taxAmount)}</dd></div>
-              <div className="flex justify-between font-bold border-t border-slate-200 pt-1.5"><dt>Total</dt><dd className="tabular-nums">{rupiah(inv.total)}</dd></div>
-              <div className="flex justify-between text-emerald-700"><dt>Terbayar</dt><dd className="tabular-nums">{rupiah(inv.paidAmount)}</dd></div>
-              <div className="flex justify-between font-bold text-base"><dt>Sisa</dt><dd className="tabular-nums">{rupiah(inv.status === "Cancelled" ? 0 : remaining)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">DPP{inv.termPercent ? ` (${inv.termPercent}%)` : ""}</dt><dd className="tabular-nums">{money(inv.subtotal, inv.currency)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">PPN {inv.taxPercent}%</dt><dd className="tabular-nums">{money(inv.taxAmount, inv.currency)}</dd></div>
+              <div className="flex justify-between font-bold border-t border-slate-200 pt-1.5"><dt>Total</dt><dd className="tabular-nums">{money(inv.total, inv.currency)}</dd></div>
+              <div className="flex justify-between text-emerald-700"><dt>Terbayar</dt><dd className="tabular-nums">{money(inv.paidAmount, inv.currency)}</dd></div>
+              <div className="flex justify-between font-bold text-base"><dt>Sisa</dt><dd className="tabular-nums">{money(inv.status === "Cancelled" ? 0 : remaining, inv.currency)}</dd></div>
             </dl>
           </Card>
 
@@ -89,7 +89,7 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
                         <td className="py-2.5 whitespace-nowrap">{p.paymentDate}</td>
                         <td className="py-2.5">{p.method}{p.reference ? ` · ${p.reference}` : ""}{p.proofUrl && <a href={p.proofUrl} target="_blank" rel="noreferrer" className="ml-2 text-blue-700 hover:underline">bukti</a>}</td>
                         <td className="py-2.5 text-slate-500">{p.receivedBy}</td>
-                        <td className="py-2.5 text-right tabular-nums font-medium">{rupiah(p.amount)}</td>
+                        <td className="py-2.5 text-right tabular-nums font-medium">{money(p.amount, inv.currency)}</td>
                         <td className="py-2.5 pl-3 text-right whitespace-nowrap"><DocLinks kind="receipt" id={p.id} label="Kwitansi" formats={["pdf"]} small /></td>
                       </tr>
                     ))}
@@ -149,7 +149,7 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
             <button type="button" onClick={() => setPayOpen(false)} aria-label="Tutup" className="p-1 text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
           </div>
           <div className="p-6 space-y-4 overflow-y-auto">
-            <p className="text-sm text-slate-600">Sisa tagihan: <b className="tabular-nums">{rupiah(remaining)}</b></p>
+            <p className="text-sm text-slate-600">Sisa tagihan: <b className="tabular-nums">{money(remaining, inv.currency)}</b></p>
             <div className="grid grid-cols-2 gap-4">
               <div><label className={labelCls} htmlFor="pay-amt">Nominal (Rp)</label><input id="pay-amt" name="amount" type="number" min={1} max={Math.ceil(remaining)} step="any" required defaultValue={Math.round(remaining)} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="pay-date">Tanggal terima</label><input id="pay-date" name="paymentDate" type="date" required max={today()} defaultValue={today()} className={inputCls} /></div>

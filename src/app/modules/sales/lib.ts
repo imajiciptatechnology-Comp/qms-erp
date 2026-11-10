@@ -79,17 +79,73 @@ export function contractBillingPeriods(c: { startDate: string; endDate: string; 
   });
 }
 
+// ---------------------------------------------------------
+// Mata uang & ekspor
+// ---------------------------------------------------------
+
+export const HOME_COUNTRY = "Indonesia";
+export const CURRENCIES = ["IDR", "USD", "EUR", "SGD"] as const;
+export const CURRENCY_NAME: Record<string, { id: string; en: string }> = {
+  IDR: { id: "rupiah", en: "Indonesian Rupiah" },
+  USD: { id: "dolar Amerika Serikat", en: "US Dollars" },
+  EUR: { id: "euro", en: "Euros" },
+  SGD: { id: "dolar Singapura", en: "Singapore Dollars" },
+};
+/** Kurs perkiraan (Rp per 1 unit) sebagai isian awal form — selalu cek kurs hari ini sebelum menawar. */
+export const DEFAULT_RATES: Record<string, number> = { IDR: 1, USD: 16500, EUR: 18000, SGD: 12600 };
+/** Negara pelanggan yang sering muncul (tetap bisa diketik bebas). */
+export const COUNTRIES = [
+  "Indonesia", "Malaysia", "Singapore", "Thailand", "Philippines", "Vietnam", "Timor-Leste", "Brunei Darussalam", "Papua New Guinea",
+  "Bangladesh", "Sri Lanka", "Nepal", "Pakistan", "India", "Saudi Arabia", "United Arab Emirates", "Qatar", "Oman", "Iraq",
+  "Egypt", "Nigeria", "Kenya", "Tanzania", "Ethiopia", "Uganda", "Ghana", "Zambia", "Mozambique", "Fiji",
+];
+/** Pelanggan luar negeri: dokumen berbahasa Inggris dan PPN 0% (ekspor barang). */
+export const isExportCustomer = (c?: { country?: string | null } | null) => !!c?.country && c.country.trim().toLowerCase() !== HOME_COUNTRY.toLowerCase();
+export const defaultTaxFor = (c?: { country?: string | null } | null) => (isExportCustomer(c) ? 0 : TAX_PERCENT);
+
+const decimals = (currency = "IDR") => (currency === "IDR" ? 0 : 2);
+/** Pembulatan sesuai valuta: Rupiah tanpa sen, valuta asing 2 desimal. */
+export const roundMoney = (n: number, currency = "IDR") => { const f = 10 ** decimals(currency); return Math.round((n || 0) * f) / f; };
+
+/** Rp 1.250.000 / USD 12,345.67 */
+export function money(n: number, currency = "IDR") {
+  if (currency === "IDR") return rupiah(n);
+  return `${currency} ${(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+export function moneyShort(n: number, currency = "IDR") {
+  if (currency === "IDR") return rupiahShort(n);
+  if (Math.abs(n) >= 1e6) return `${currency} ${(n / 1e6).toLocaleString("en-US", { maximumFractionDigits: 2 })}M`;
+  if (Math.abs(n) >= 1e3) return `${currency} ${(n / 1e3).toLocaleString("en-US", { maximumFractionDigits: 1 })}K`;
+  return money(n, currency);
+}
+/** Nilai dalam Rupiah memakai kurs yang dicatat di dokumen (untuk menjumlah dashboard lintas valuta). */
+export const toIdr = (n: number, rec?: { currency?: string | null; exchangeRate?: number | null } | null) =>
+  !rec?.currency || rec.currency === "IDR" ? n : n * (rec.exchangeRate || 0);
+/** Harga master produk (Rupiah) dalam valuta penawaran. */
+export const fromIdr = (idr: number, currency = "IDR", rate = 1) => (currency === "IDR" ? idr : roundMoney(idr / (rate || 1), currency));
+
 export type LineInput = { productId?: string | null; description: string; specs?: string | null; qty: number; unit: string; unitPrice: number; discountPercent?: number };
 
-export function lineTotal(l: LineInput) {
-  return Math.round(l.qty * l.unitPrice * (1 - (l.discountPercent || 0) / 100));
+export function lineTotal(l: LineInput, currency = "IDR") {
+  return roundMoney(l.qty * l.unitPrice * (1 - (l.discountPercent || 0) / 100), currency);
 }
 
-export function computeTotals(lines: LineInput[], discountPercent = 0, taxPercent = TAX_PERCENT) {
-  const subtotal = lines.reduce((s, l) => s + lineTotal(l), 0);
-  const discountAmount = Math.round(subtotal * discountPercent / 100);
-  const taxAmount = Math.round((subtotal - discountAmount) * taxPercent / 100);
-  return { subtotal, discountAmount, taxAmount, total: subtotal - discountAmount + taxAmount };
+export function computeTotals(lines: LineInput[], discountPercent = 0, taxPercent = TAX_PERCENT, currency = "IDR") {
+  const r = (n: number) => roundMoney(n, currency);
+  const subtotal = r(lines.reduce((s, l) => s + lineTotal(l, currency), 0));
+  const discountAmount = r(subtotal * discountPercent / 100);
+  const taxAmount = r((subtotal - discountAmount) * taxPercent / 100);
+  return { subtotal, discountAmount, taxAmount, total: r(subtotal - discountAmount + taxAmount) };
+}
+
+/** Status tanggal L/C: sisa hari menuju batas kirim & kedaluwarsa. */
+export function lcState(so: { lcNo?: string | null; lcExpiryDate?: string | null; lcLatestShipment?: string | null }) {
+  if (!so.lcNo) return null;
+  const shipDays = so.lcLatestShipment ? daysBetween(today(), so.lcLatestShipment) : null;
+  const expiryDays = so.lcExpiryDate ? daysBetween(today(), so.lcExpiryDate) : null;
+  const level = (shipDays !== null && shipDays < 0) || (expiryDays !== null && expiryDays < 0) ? "expired"
+    : (shipDays !== null && shipDays <= 14) || (expiryDays !== null && expiryDays <= 14) ? "warning" : "ok";
+  return { shipDays, expiryDays, level } as const;
 }
 
 export function needsApproval(discountPercent: number, lines: { discountPercent?: number }[]) {
@@ -114,6 +170,17 @@ export const DEFAULT_TEXT = {
   payment: "DP 30% setelah PO diterima; pelunasan 70% sebelum barang dikirim (termasuk L/C).",
   delivery: "Franco lokasi customer. Waktu produksi 8–12 minggu setelah PO dan DP diterima; pengiriman setelah pelunasan.",
   warranty: "Garansi 12 bulan suku cadang dan jasa sejak BAST instalasi & training.",
+};
+
+/** Teks baku penawaran untuk pelanggan luar negeri (dokumen berbahasa Inggris). */
+export const DEFAULT_TEXT_EN = {
+  intro: (topic: string) => `Dear Sir/Madam,
+
+PT Labtech Penta International, a manufacturer of technical and vocational (TVET) training equipment based in Batam, Indonesia, is pleased to submit our quotation for ${topic || "training equipment"} as per your requirement. Specifications and prices are detailed below.`,
+  closing: "Prices include export packing (seaworthy wooden crates), installation, commissioning and Training of Trainers at site. Local taxes and import duties in the destination country are excluded. We would be glad to arrange a technical presentation or online demonstration at your convenience.\n\nThank you for your kind attention. We look forward to your favourable reply.",
+  payment: "30% advance payment upon PO; 70% balance before shipment, or 100% by irrevocable L/C at sight.",
+  delivery: "FOB Batam, Indonesia. Production time 8–12 weeks after receipt of PO and advance payment; shipment after full payment.",
+  warranty: "12 months warranty for parts and service from the date of installation & training handover (BAST).",
 };
 
 export const STAGES =["Lead", "Qualified", "Quotation", "Negotiation", "Won", "Lost"] as const;
@@ -215,10 +282,10 @@ export type CratePackage = { crateNo: string; contents: string; dims?: string; g
  * Gerbang pelunasan: SO dianggap lunas bila total pembayaran semua invoice-nya (yang tidak batal)
  * sudah menutup nilai SO. L/C dicatat sebagai pembayaran, jadi aturannya sama.
  */
-export function orderPaidStatus(so: { total: number; invoices: { status: string; paidAmount: number }[] }) {
+export function orderPaidStatus(so: { total: number; currency?: string; invoices: { status: string; paidAmount: number }[] }) {
   const paid = so.invoices.filter(i => i.status !== "Cancelled").reduce((s, i) => s + i.paidAmount, 0);
-  const remaining = Math.max(0, Math.round(so.total - paid));
-  return { paid, remaining, fullyPaid: remaining <= 1 };
+  const remaining = Math.max(0, roundMoney(so.total - paid, so.currency));
+  return { paid, remaining, fullyPaid: remaining <= (so.currency && so.currency !== "IDR" ? 0.01 : 1) };
 }
 
 // ---------------------------------------------------------

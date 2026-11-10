@@ -8,7 +8,7 @@ import ModalShell from "@/components/ui/ModalShell";
 import {
   createSalesOrderFromQuotation, decideQuotation, deleteQuotation, reviseQuotation, setQuotationStatus, submitQuotation,
 } from "../../actions";
-import { PAYMENT_SCHEDULES, addDays, needsApproval, rupiah, today, type SalesAccess } from "../../lib";
+import { PAYMENT_SCHEDULES, addDays, needsApproval, today, type SalesAccess, money } from "../../lib";
 import { Card, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
 
 type Item = { id: string; description: string; specs: string | null; qty: number; unit: string; unitPrice: number; discountPercent: number; lineTotal: number };
@@ -16,9 +16,9 @@ type Q = {
   id: string; quotationNo: string; revision: number; date: string; validUntil: string; status: string; subject: string; attention: string | null;
   introText: string | null; closingText: string | null; subtotal: number; discountPercent: number; discountAmount: number; taxPercent: number; taxAmount: number; total: number;
   paymentTerms: string | null; deliveryTerms: string | null; warrantyTerms: string | null; notes: string | null; salesName: string; approvedBy: string | null; approvedAt: string | null;
-  historyJson: string; customer: { id: string; name: string; address: string | null; city: string | null; paymentTerms: string };
+  historyJson: string; currency: string; exchangeRate: number; customer: { id: string; name: string; address: string | null; city: string | null; paymentTerms: string; country: string };
   opportunity: { opportunityNo: string; title: string } | null; items: Item[]; salesOrders: { id: string; soNo: string }[];
-  revisions: { id: string; revision: number; status: string; date: string; total: number }[];
+  revisions: { id: string; revision: number; status: string; date: string; total: number; currency: string }[];
 };
 
 export default function QuotationDetail({ q, access }: { q: Q; access: SalesAccess }) {
@@ -100,18 +100,18 @@ export default function QuotationDetail({ q, access }: { q: Q; access: SalesAcce
                       <td className="px-3 py-2.5 text-slate-500">{i + 1}</td>
                       <td className="px-3 py-2.5"><p className="font-medium">{it.description}</p>{it.specs && <p className="text-xs text-slate-500 mt-0.5">{it.specs}</p>}</td>
                       <td className="px-3 py-2.5 text-right whitespace-nowrap">{it.qty} {it.unit}</td>
-                      <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">{rupiah(it.unitPrice)}{it.discountPercent > 0 && <span className="block text-xs text-amber-700">diskon {it.discountPercent}%</span>}</td>
-                      <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums font-medium">{rupiah(it.lineTotal)}</td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">{money(it.unitPrice, q.currency)}{it.discountPercent > 0 && <span className="block text-xs text-amber-700">diskon {it.discountPercent}%</span>}</td>
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums font-medium">{money(it.lineTotal, q.currency)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <dl className="ml-auto w-full sm:w-80 space-y-1.5">
-              <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd className="tabular-nums">{rupiah(q.subtotal)}</dd></div>
-              {q.discountAmount > 0 && <div className="flex justify-between"><dt className="text-slate-500">Diskon {q.discountPercent}%</dt><dd className="tabular-nums">− {rupiah(q.discountAmount)}</dd></div>}
-              <div className="flex justify-between"><dt className="text-slate-500">PPN {q.taxPercent}%</dt><dd className="tabular-nums">{rupiah(q.taxAmount)}</dd></div>
-              <div className="flex justify-between border-t border-slate-200 pt-2 font-bold text-base"><dt>Total</dt><dd className="tabular-nums">{rupiah(q.total)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd className="tabular-nums">{money(q.subtotal, q.currency)}</dd></div>
+              {q.discountAmount > 0 && <div className="flex justify-between"><dt className="text-slate-500">Diskon {q.discountPercent}%</dt><dd className="tabular-nums">− {money(q.discountAmount, q.currency)}</dd></div>}
+              <div className="flex justify-between"><dt className="text-slate-500">PPN {q.taxPercent}%</dt><dd className="tabular-nums">{money(q.taxAmount, q.currency)}</dd></div>
+              <div className="flex justify-between border-t border-slate-200 pt-2 font-bold text-base"><dt>Total</dt><dd className="tabular-nums">{money(q.total, q.currency)}</dd></div>
             </dl>
 
             <dl className="grid sm:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
@@ -139,7 +139,7 @@ export default function QuotationDetail({ q, access }: { q: Q; access: SalesAcce
                   <li key={r.id}>
                     <Link href={`/modules/sales/quotations/${r.id}`} className={`flex items-center justify-between gap-2 text-sm rounded-lg px-2 py-1.5 -mx-2 ${r.id === q.id ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                       <span className="font-medium text-slate-800">Rev.{r.revision} <span className="text-slate-500 font-normal">· {r.date}</span></span>
-                      <span className="flex items-center gap-2"><span className="tabular-nums text-slate-700">{rupiah(r.total)}</span><StatusBadge status={r.status} /></span>
+                      <span className="flex items-center gap-2"><span className="tabular-nums text-slate-700">{money(r.total, r.currency)}</span><StatusBadge status={r.status} /></span>
                     </Link>
                   </li>
                 ))}
@@ -158,7 +158,7 @@ export default function QuotationDetail({ q, access }: { q: Q; access: SalesAcce
             <button type="button" onClick={() => setSoOpen(false)} aria-label="Tutup" className="p-1 text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
           </div>
           <div className="p-6 space-y-4 overflow-y-auto">
-            <p className="text-sm text-slate-600">Sales Order dibuat dari {q.quotationNo} Rev.{q.revision} ({rupiah(q.total)}) dan masuk tahap <b>Contract Review</b>.</p>
+            <p className="text-sm text-slate-600">Sales Order dibuat dari {q.quotationNo} Rev.{q.revision} ({money(q.total, q.currency)}) dan masuk tahap <b>Contract Review</b>.</p>
             <div className="grid grid-cols-2 gap-4">
               <div><label className={labelCls} htmlFor="po-no">No. PO customer</label><input id="po-no" name="customerPoNo" required className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="po-date">Tanggal PO</label><input id="po-date" name="customerPoDate" type="date" required max={today()} defaultValue={today()} className={inputCls} /></div>

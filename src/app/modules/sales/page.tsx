@@ -3,7 +3,7 @@ import { AlertTriangle, FileSignature, Receipt, Target, Trophy } from "lucide-re
 import { getSalesAccess } from "./access";
 import { getSalesOverview } from "./actions";
 import { getApprovalQueue } from "./server";
-import { STAGES, contractState, daysBetween, invoiceState, rupiah, rupiahShort, today } from "./lib";
+import { STAGES, contractState, daysBetween, invoiceState, rupiahShort, toIdr, today, money } from "./lib";
 import { Card, StatCard, StatusBadge } from "./ui";
 
 export default async function SalesOverviewPage() {
@@ -20,9 +20,10 @@ export default async function SalesOverviewPage() {
   const winRate = won + lost ? Math.round(won / (won + lost) * 100) : 0;
 
   const invoices = openInvoices.map(i => ({ ...i, state: invoiceState(i), outstanding: i.total - i.paidAmount }));
-  const receivable = invoices.reduce((s, i) => s + i.outstanding, 0);
+  // Lintas valuta: dijumlah dalam Rupiah dengan kurs pada invoice.
+  const receivable = invoices.reduce((s, i) => s + toIdr(i.outstanding, i), 0);
   const overdue = invoices.filter(i => i.state === "Overdue");
-  const overdueAmount = overdue.reduce((s, i) => s + i.outstanding, 0);
+  const overdueAmount = overdue.reduce((s, i) => s + toIdr(i.outstanding, i), 0);
 
   const contracts = activeContracts.map(c => ({ ...c, state: contractState(c) }));
   const attention = contracts.filter(c => c.state !== "Active");
@@ -72,7 +73,7 @@ export default async function SalesOverviewPage() {
                         <p className="text-xs text-slate-500 truncate">{a.customer} · {a.detail}</p>
                       </div>
                       {a.dueDate ? <span className={`text-xs font-semibold shrink-0 ${late ? "text-red-700" : "text-amber-800"}`}>{late ? `Lewat batas ${a.dueDate}` : `Batas ${a.dueDate}`}</span>
-                        : a.amount ? <span className="text-sm font-semibold text-slate-800 tabular-nums shrink-0">{rupiah(a.amount)}</span> : null}
+                        : a.amount ? <span className="text-sm font-semibold text-slate-800 tabular-nums shrink-0">{money(a.amount, a.currency)}</span> : null}
                     </Link>
                   </li>
                 );
@@ -94,7 +95,7 @@ export default async function SalesOverviewPage() {
                       <p className="text-xs text-slate-500 truncate">{i.customer.name} · jatuh tempo {i.dueDate}{i.state === "Overdue" ? ` (${daysBetween(i.dueDate, today())} hari lewat)` : ""}</p>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-semibold text-slate-800 tabular-nums">{rupiah(i.outstanding)}</p>
+                      <p className="text-sm font-semibold text-slate-800 tabular-nums">{money(i.outstanding, i.currency)}</p>
                       <StatusBadge status={i.state} />
                     </div>
                   </Link>
@@ -132,7 +133,7 @@ export default async function SalesOverviewPage() {
                     <p className="text-xs text-slate-500 truncate">{o.customer.name}{o.expectedDelivery ? ` · target kirim ${o.expectedDelivery}` : ""}</p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0">
-                    <span className="text-sm font-semibold text-slate-800 tabular-nums hidden sm:inline">{rupiah(o.total)}</span>
+                    <span className="text-sm font-semibold text-slate-800 tabular-nums hidden sm:inline">{money(o.total, o.currency)}</span>
                     <StatusBadge status={o.status} />
                   </div>
                 </Link>

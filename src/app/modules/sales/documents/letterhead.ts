@@ -12,6 +12,11 @@ export const LETTERHEAD = {
   npwp: "00.000.000.0-000.000",
   city: "Jakarta",
   bank: "Bank Contoh · No. Rek. 000-000-0000 · a.n. PT Labtech Penta International",
+  /** Rekening valuta asing untuk pembayaran ekspor / L/C (dummy). */
+  bankIntl: "Bank Contoh, Batam Branch · SWIFT CONTIDJA · USD Account 000-000-0001 · Beneficiary: PT Labtech Penta International",
+  /** Pabrik & pelabuhan muat untuk dokumen ekspor (dummy). */
+  factory: "Kawasan Industri Contoh, Batam, Riau Islands, Indonesia",
+  portOfLoading: "Batu Ampar, Batam, Indonesia",
   /** Penandatangan dari pihak Labtech (dummy). */
   signatories: {
     director: { name: "Budi Santoso", title: "Direktur" },

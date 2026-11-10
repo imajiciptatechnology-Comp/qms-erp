@@ -3,7 +3,7 @@
 import { X } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
 import { saveCustomer, type CustomerInput } from "../actions";
-import { CUSTOMER_TYPES } from "../lib";
+import { COUNTRIES, CURRENCIES, CUSTOMER_TYPES } from "../lib";
 import { ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
 
 export type CustomerFormValue = CustomerInput & { id?: string };
@@ -25,6 +25,7 @@ export default function CustomerModal({ value, onClose }: { value: CustomerFormV
             name: f.name, type: f.type, npwp: f.npwp || undefined, address: f.address || undefined, city: f.city || undefined, contactName: f.contactName || undefined,
             contactTitle: f.contactTitle || undefined, contactEmail: f.contactEmail || undefined, contactPhone: f.contactPhone || undefined, paymentTerms: f.paymentTerms || "30 hari", notes: f.notes || undefined,
             signatoryName: f.signatoryName || undefined, signatoryTitle: f.signatoryTitle || undefined,
+            country: f.country || "Indonesia", currency: f.currency || "IDR",
           }), onClose);
         }}>
           <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -37,6 +38,9 @@ export default function CustomerModal({ value, onClose }: { value: CustomerFormV
             {field("npwp", "NPWP")}
             <div className="sm:col-span-2">{field("address", "Alamat")}</div>
             {field("city", "Kota")}
+            <div><label className={labelCls} htmlFor="cu-country">Negara</label><input id="cu-country" name="country" list="cu-countries" defaultValue={v.country ?? "Indonesia"} className={inputCls} /><datalist id="cu-countries">{COUNTRIES.map(c => <option key={c} value={c} />)}</datalist></div>
+            <div><label className={labelCls} htmlFor="cu-currency">Mata uang penawaran</label><select id="cu-currency" name="currency" defaultValue={v.currency ?? "IDR"} className={inputCls}>{CURRENCIES.map(c => <option key={c}>{c}</option>)}</select></div>
+            <p className="sm:col-span-2 text-xs text-slate-500 -mt-2">Negara selain Indonesia = customer ekspor: dokumen berbahasa Inggris dan PPN 0%.</p>
             {field("paymentTerms", "Termin bayar default", { placeholder: "30 hari" })}
             {field("contactName", "Nama kontak")}
             {field("contactTitle", "Jabatan")}

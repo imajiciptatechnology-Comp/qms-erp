@@ -1,7 +1,7 @@
 // Helper server untuk modul Sales yang dipakai server actions DAN AI Assistant.
 // Sengaja bukan file "use server": fungsi di sini tidak boleh bisa dipanggil langsung dari browser.
 import { prisma } from "@/lib/prisma";
-import { DEFAULT_TEXT, STAGE_PROBABILITY, TAX_PERCENT, computeTotals, lineTotal, today, type LineInput } from "./lib";
+import { CURRENCIES, DEFAULT_TEXT, DEFAULT_TEXT_EN, STAGE_PROBABILITY, TAX_PERCENT, computeTotals, isExportCustomer, lineTotal, money, today, type LineInput } from "./lib";
 
 export function addHistory(json: string, userName: string, action: string) {
   const list = JSON.parse(json || "[]");
@@ -32,6 +32,10 @@ export type QuotationInput = {
   customerId: string; opportunityId?: string | null; date: string; validUntil: string; subject: string; attention?: string;
   introText?: string; closingText?: string; discountPercent: number; paymentTerms?: string; deliveryTerms?: string;
   warrantyTerms?: string; notes?: string; items: LineInput[];
+  /** Valuta penawaran (default IDR) dan kurs Rp per 1 unit valuta. */
+  currency?: string; exchangeRate?: number;
+  /** PPN %: 11 domestik, 0 untuk ekspor. Kosong = 11. */
+  taxPercent?: number;
 };
 
 export function quotationData(data: QuotationInput) {
@@ -40,12 +44,18 @@ export function quotationData(data: QuotationInput) {
   const items = data.items.filter(i => i.description?.trim());
   if (items.length === 0) throw new Error("Tambahkan minimal satu item.");
   if (items.some(i => !(i.qty > 0) || !(i.unitPrice >= 0))) throw new Error("Jumlah dan harga item harus valid.");
+  const currency = data.currency || "IDR";
+  if (!(CURRENCIES as readonly string[]).includes(currency)) throw new Error("Mata uang tidak dikenal.");
+  const exchangeRate = currency === "IDR" ? 1 : Number(data.exchangeRate);
+  if (!(exchangeRate > 0)) throw new Error("Isi kurs (Rp per 1 " + currency + ").");
+  const taxPercent = data.taxPercent ?? TAX_PERCENT;
+  if (!(taxPercent >= 0 && taxPercent <= 100)) throw new Error("PPN tidak valid.");
   const { items: _items, ...rest } = data; // eslint-disable-line @typescript-eslint/no-unused-vars
   return {
-    fields: { ...rest, opportunityId: data.opportunityId || null, taxPercent: TAX_PERCENT, ...computeTotals(items, data.discountPercent) },
+    fields: { ...rest, opportunityId: data.opportunityId || null, currency, exchangeRate, taxPercent, ...computeTotals(items, data.discountPercent, taxPercent, currency) },
     items: items.map((i, idx) => ({
       productId: i.productId || null, description: i.description, specs: i.specs || null, qty: i.qty, unit: i.unit,
-      unitPrice: i.unitPrice, discountPercent: i.discountPercent || 0, lineTotal: lineTotal(i), sortOrder: idx + 1,
+      unitPrice: i.unitPrice, discountPercent: i.discountPercent || 0, lineTotal: lineTotal(i, currency), sortOrder: idx + 1,
     })),
   };
 }
@@ -57,8 +67,20 @@ export function quotationData(data: QuotationInput) {
 export async function fillQuotationDefaults(data: QuotationInput): Promise<QuotationInput> {
   const blank = (v?: string | null) => !v || !v.trim();
   if (![data.introText, data.closingText, data.paymentTerms, data.deliveryTerms, data.warrantyTerms].some(blank)) return data;
-  const customer = await prisma.customer.findUnique({ where: { id: data.customerId }, select: { paymentTerms: true } });
+  const customer = await prisma.customer.findUnique({ where: { id: data.customerId }, select: { paymentTerms: true, country: true } });
   const names = [...new Set(data.items.filter(i => i.description?.trim() && !/^(Jasa|Instalasi|Kontrak)/i.test(i.description)).map(i => i.description.split(" — ")[0].trim()))];
+  if (isExportCustomer(customer)) {
+    const T = DEFAULT_TEXT_EN;
+    const topic = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0] ?? "";
+    return {
+      ...data,
+      introText: blank(data.introText) ? T.intro(topic) : data.introText,
+      closingText: blank(data.closingText) ? T.closing : data.closingText,
+      paymentTerms: blank(data.paymentTerms) ? T.payment : data.paymentTerms,
+      deliveryTerms: blank(data.deliveryTerms) ? T.delivery : data.deliveryTerms,
+      warrantyTerms: blank(data.warrantyTerms) ? T.warranty : data.warrantyTerms,
+    };
+  }
   const topic = names.length > 1 ? `${names.slice(0, -1).join(", ")} dan ${names[names.length - 1]}` : names[0] ?? "";
   const terms = customer?.paymentTerms ?? "30 hari";
   return {
@@ -132,7 +154,7 @@ export type ApprovalItem = {
   kind: "quotation" | "contract" | "shipment" | "service-job" | "sales-order";
   id: string; ref: string; customer: string; title: string; detail: string; requestedBy: string | null;
   /** Tanggal pengajuan / batas keputusan (YYYY-MM-DD). */
-  date: string | null; dueDate?: string | null; amount?: number | null; href: string;
+  date: string | null; dueDate?: string | null; amount?: number | null; currency?: string; href: string;
   /** false = cukup dibuka (mis. contract review SO), tidak diputuskan dari dashboard. */
   decidable: boolean;
 };
@@ -149,7 +171,7 @@ export async function getApprovalQueue(): Promise<ApprovalItem[]> {
   return [
     ...quotations.map(q => ({
       kind: "quotation" as const, id: q.id, ref: `${q.quotationNo} Rev.${q.revision}`, customer: q.customer.name, title: "Diskon penawaran di atas batas",
-      detail: `${q.subject} · diskon ${maxDisc(q)}%`, requestedBy: q.salesName, date: q.date, amount: q.total, href: `/modules/sales/quotations/${q.id}`, decidable: true,
+      detail: `${q.subject} · diskon ${maxDisc(q)}%`, requestedBy: q.salesName, date: q.date, amount: q.total, currency: q.currency, href: `/modules/sales/quotations/${q.id}`, decidable: true,
     })),
     ...contracts.map(c => ({
       kind: "contract" as const, id: c.id, ref: c.contractNo, customer: c.customer.name, title: `Kontrak ${c.type}`,
@@ -159,8 +181,8 @@ export async function getApprovalQueue(): Promise<ApprovalItem[]> {
       const paid = s.salesOrder.invoices.filter(i => i.status !== "Cancelled").reduce((t, i) => t + i.paidAmount, 0);
       return {
         kind: "shipment" as const, id: s.id, ref: s.shipmentNo, customer: s.customer.name, title: "Izin kirim sebelum lunas",
-        detail: `${s.salesOrder.soNo} · sisa Rp ${Math.max(0, Math.round(s.salesOrder.total - paid)).toLocaleString("id-ID")} · alasan: ${s.exceptionReason ?? "-"}`,
-        requestedBy: s.exceptionRequestedBy, date: s.createdAt, amount: s.salesOrder.total, href: `/modules/contract-shipping/shipments/${s.id}`, decidable: true,
+        detail: `${s.salesOrder.soNo} · sisa ${money(Math.max(0, s.salesOrder.total - paid), s.salesOrder.currency)} · alasan: ${s.exceptionReason ?? "-"}`,
+        requestedBy: s.exceptionRequestedBy, date: s.createdAt, amount: s.salesOrder.total, currency: s.salesOrder.currency, href: `/modules/contract-shipping/shipments/${s.id}`, decidable: true,
       };
     }),
     ...jobs.map(j => ({
@@ -170,7 +192,7 @@ export async function getApprovalQueue(): Promise<ApprovalItem[]> {
     })),
     ...orders.map(o => ({
       kind: "sales-order" as const, id: o.id, ref: o.soNo, customer: o.customer.name, title: "PO masuk — contract review & konfirmasi",
-      detail: `PO ${o.customerPoNo}`, requestedBy: o.salesName, date: o.orderDate, amount: o.total, href: `/modules/sales/orders/${o.id}`, decidable: false,
+      detail: `PO ${o.customerPoNo}`, requestedBy: o.salesName, date: o.orderDate, amount: o.total, currency: o.currency, href: `/modules/sales/orders/${o.id}`, decidable: false,
     })),
   ];
 }

@@ -57,7 +57,7 @@ function letterhead() {
   });
 }
 
-function footer(number: string) {
+function footer(number: string, lang?: "id" | "en") {
   return new Footer({
     children: [
       new Paragraph({
@@ -65,7 +65,7 @@ function footer(number: string) {
         tabStops: [{ type: "right", position: PAGE_W }],
         children: [
           run(L.company, { bold: true, size: 14, color: C.primary }),
-          run(`\t${number}  ·  Hal. `, { size: 14, color: C.muted }),
+          run(`\t${number}  ·  ${lang === "en" ? "Page" : "Hal."} `, { size: 14, color: C.muted }),
           new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: 14, color: C.muted }),
           run("/", { size: 14, color: C.muted }),
           new TextRun({ children: [PageNumber.TOTAL_PAGES], font: FONT, size: 14, color: C.muted }),
@@ -166,6 +166,8 @@ const WATERMARK_TEXT = {
   DRAFT: "DRAFT — belum disetujui, jangan dikirim ke customer",
   LUNAS: "LUNAS",
   DIBATALKAN: "DIBATALKAN — dokumen ini tidak berlaku",
+  PAID: "PAID",
+  CANCELLED: "CANCELLED — this document is void",
 };
 
 return async function renderDocx(d: DocModel) {
@@ -176,9 +178,9 @@ return async function renderDocx(d: DocModel) {
     sections: [{
       properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1900, bottom: 1200, left: 1134, right: 1134, header: 400, footer: 400 } } },
       headers: { default: letterhead() },
-      footers: { default: footer(d.number) },
+      footers: { default: footer(d.number, d.lang) },
       children: [
-        ...(d.watermark ? [para([run(WATERMARK_TEXT[d.watermark], { bold: true, color: d.watermark === "LUNAS" ? "047857" : "B91C1C", size: 16 })], { align: AlignmentType.CENTER, after: 60 })] : []),
+        ...(d.watermark ? [para([run(WATERMARK_TEXT[d.watermark], { bold: true, color: d.watermark === "LUNAS" || d.watermark === "PAID" ? "047857" : "B91C1C", size: 16 })], { align: AlignmentType.CENTER, after: 60 })] : []),
         para([run(d.title, { bold: true, size: 24, color: C.primary })], { align: AlignmentType.CENTER, after: 0, before: 120 }),
         para([run(`No. ${d.number}`, { color: C.muted, size: 17 })], { align: AlignmentType.CENTER, after: 240 }),
         ...(d.recipient || d.meta ? [new Table({

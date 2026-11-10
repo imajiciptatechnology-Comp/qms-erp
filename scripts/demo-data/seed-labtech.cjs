@@ -4,6 +4,9 @@
  *   Sales Order → produksi → pelunasan → shipment → instalasi & training → BAST → garansi → tiket CS.
  * Juga role Contract & Shipping Admin / Training Coordinator dan akun demonya.
  *
+ * Ekspor: customer luar negeri (Jordan, Kenya) bertransaksi dalam USD (PPN 0%, kurs dicatat di dokumen),
+ * order F memakai L/C dengan batas pengiriman yang sudah dekat, produk trainer punya kode HS.
+ *
  * AMAN dijalankan berulang: semua record pakai id "DEMO-LT-…" dan di-upsert; data lain (termasuk data
  * test user) tidak dihapus. Produk demo lama (alat laboratorium, id DEMO-PRD-LPI-…) hanya dinonaktifkan.
  *
@@ -19,6 +22,11 @@ const hist = (...actions) => JSON.stringify(actions.map(([daysAgo, by, action], 
 const ym = day(0).slice(0, 7).replace("-", "/");
 const no = (kind, seq) => `LPI/${kind}/${ym}/${String(seq).padStart(4, "0")}`;
 const TAX = 11;
+/** Kurs demo (Rp per 1 USD) untuk order ekspor. */
+const USD_RATE = 16200;
+const round2 = n => Math.round(n * 100) / 100;
+/** Kode HS trainer / alat peraga pendidikan (Bab 90.23). Jasa tidak punya kode HS. */
+const HS_TRAINER = "9023.00.00";
 
 const SALES = "Rina Kartika";
 const MGR = "Hendra Wijaya";
@@ -60,19 +68,25 @@ const CUSTOMERS = [
   { key: "PTN", name: "Politeknik Teknologi Nusantara", type: "Politeknik", city: "Bandung", address: "Jl. Ciwaruga No. 18, Bandung Barat 40559", contactName: "Ir. Dedi Kurniadi, M.T.", contactTitle: "Ketua Jurusan Teknik Refrigerasi & Tata Udara", contactPhone: "0812-2001-5512", contactEmail: "dedi.k@ptn.ac.id", paymentTerms: "Sesuai kontrak (termin)" },
   { key: "SMK", name: "SMK Negeri 3 Kota Mandala", type: "SMK", city: "Semarang", address: "Jl. Sugiyopranoto No. 7, Semarang 50131", contactName: "Drs. Bambang Wiratno", contactTitle: "Kepala Sekolah", contactPhone: "0813-2554-8801", contactEmail: "smkn3@mandala.sch.id", paymentTerms: "Sesuai kontrak (termin)" },
   { key: "BLK", name: "Balai Latihan Kerja Industri Banten Raya", type: "Balai Latihan Kerja", city: "Serang", address: "Jl. Raya Cilegon Km 8, Serang, Banten 42183", contactName: "Agus Salim, S.T.", contactTitle: "Kepala Seksi Pelatihan", contactPhone: "0821-1120-7733", contactEmail: "pelatihan@blkibantenraya.go.id", paymentTerms: "30 hari" },
-  { key: "ANC", name: "Al-Noor Technical College", type: "Lembaga Internasional", city: "Amman, Jordan", address: "Al-Madina Al-Munawara St. 214, Amman, Jordan", contactName: "Eng. Khaled Haddad", contactTitle: "Head of Workshops", contactPhone: "+962-6-555-0142", contactEmail: "k.haddad@alnoor-tc.edu.jo", paymentTerms: "L/C at sight" },
+  { key: "ANC", name: "Al-Noor Technical College", type: "Lembaga Internasional", city: "Amman, Jordan", address: "Al-Madina Al-Munawara St. 214, Amman, Jordan", contactName: "Eng. Khaled Haddad", contactTitle: "Head of Workshops", contactPhone: "+962-6-555-0142", contactEmail: "k.haddad@alnoor-tc.edu.jo", paymentTerms: "L/C at sight", country: "Jordan", currency: "USD" },
+  { key: "KEN", customerNo: "CUS-LT-006", name: "Coastal Technical Training Institute", type: "Lembaga Internasional", city: "Mombasa, Kenya", address: "Moi Avenue, P.O. Box 90420-80100, Mombasa, Kenya", contactName: "Mr. Peter Otieno", contactTitle: "Principal", contactPhone: "+254-41-222-0187", contactEmail: "principal@coastal-tti.ac.ke", paymentTerms: "L/C at sight", country: "Kenya", currency: "USD" },
   { key: "UTM", name: "Fakultas Teknik Universitas Teknologi Maritim", type: "Universitas", city: "Surabaya", address: "Jl. Arief Rahman Hakim No. 100, Surabaya 60111", contactName: "Dr. Ir. Ratna Puspita", contactTitle: "Kepala Laboratorium Konversi Energi", contactPhone: "0811-3300-4021", contactEmail: "ratna.p@utm.ac.id", paymentTerms: "30 hari" },
 ];
 const custId = k => `${P}CUS-${k}`;
 const custByKey = k => CUSTOMERS.find(c => c.key === k);
 
-function items(lines, key = "X") {
+/** rate = Rp per 1 unit valuta (1 = Rupiah). Harga valuta asing = harga master / kurs, 2 desimal. */
+function items(lines, key = "X", rate = 1) {
   return lines.map(([sku, qty], i) => {
     const p = prod(sku);
-    return { id: `${P}SOI-${key}-${sku}-${i}`, productId: prodId(sku), description: p.model ? `${p.name} — Labtech ${p.model}` : `${p.name} — Labtech`, qty, unit: p.unit || "Unit", unitPrice: p.price, lineTotal: Math.round(p.price * qty), sortOrder: i + 1 };
+    const unitPrice = rate === 1 ? p.price : round2(p.price / rate);
+    return { id: `${P}SOI-${key}-${sku}-${i}`, productId: prodId(sku), description: p.model ? `${p.name} — Labtech ${p.model}` : `${p.name} — Labtech`, qty, unit: p.unit || "Unit", unitPrice, lineTotal: rate === 1 ? Math.round(unitPrice * qty) : round2(unitPrice * qty), sortOrder: i + 1 };
   });
 }
-const totals = its => { const subtotal = its.reduce((s, i) => s + i.lineTotal, 0); const taxAmount = Math.round(subtotal * TAX / 100); return { subtotal, taxAmount, total: subtotal + taxAmount }; };
+const rnd = (n, rate) => (rate === 1 ? Math.round(n) : round2(n));
+const totals = (its, tax = TAX, rate = 1) => { const subtotal = rnd(its.reduce((s, i) => s + i.lineTotal, 0), rate); const taxAmount = rnd(subtotal * tax / 100, rate); return { subtotal, taxAmount, total: rnd(subtotal + taxAmount, rate) }; };
+/** Order ekspor: USD, PPN 0%. */
+const EXPORT = { currency: "USD", rate: USD_RATE, tax: 0 };
 
 const SCHED_LC = [{ label: "Pembayaran 100% (L/C)", percent: 100, trigger: "L/C cair sebelum barang dikirim" }];
 const SCHED_30 = [{ label: "DP 30%", percent: 30, trigger: "Setelah PO diterima" }, { label: "Pelunasan 70%", percent: 70, trigger: "Sebelum barang dikirim" }];
@@ -84,7 +98,10 @@ const ORDERS = [
   { key: "A", cust: "UTM", seq: 901, lines: [["LT-REN-810", 2], ["LT-ELC-640", 2], ["LT-SRV-001", 1]], sched: SCHED_30, status: "Confirmed", prod: "In Production", prodStart: day(-12), prodTarget: day(30), paid: [1, null], orderDate: day(-20) },
   { key: "B", cust: "SMK", seq: 902, lines: [["LT-AUT-410", 2], ["LT-AUT-520", 3], ["LT-SRV-001", 1]], sched: SCHED_30, status: "Confirmed", prod: "Ready to Ship", prodStart: day(-60), prodTarget: day(-3), paid: [1, 0], orderDate: day(-75) },
   { key: "C", cust: "BLK", seq: 903, lines: [["LT-ELC-610", 4], ["LT-ELN-710", 6], ["LT-SRV-001", 1]], sched: SCHED_30, status: "In Delivery", prod: "Ready to Ship", prodStart: day(-70), prodTarget: day(-10), paid: [1, 1], orderDate: day(-85) },
-  { key: "D", cust: "ANC", seq: 904, lines: [["LT-HVAC-110", 4], ["LT-HVAC-220", 2], ["LT-SRV-001", 1]], sched: SCHED_LC, status: "In Delivery", prod: "Ready to Ship", prodStart: day(-95), prodTarget: day(-35), paid: [1], orderDate: day(-110) },
+  { key: "D", cust: "ANC", seq: 904, lines: [["LT-HVAC-110", 4], ["LT-HVAC-220", 2], ["LT-SRV-001", 1]], sched: SCHED_LC, status: "In Delivery", prod: "Ready to Ship", prodStart: day(-95), prodTarget: day(-35), paid: [1], orderDate: day(-110), ...EXPORT,
+    lc: { lcNo: "ARB-LC-26-00419", lcIssuingBank: "Arab Bank plc, Amman", lcIssueDate: day(-100), lcLatestShipment: day(-25), lcExpiryDate: day(-10), lcNotes: "Irrevocable, at sight. Dokumen: Commercial Invoice 3 asli, Packing List, B/L full set, COO Form (non-preferential), polis asuransi 110% CIF." } },
+  { key: "F", cust: "KEN", seq: 906, lines: [["LT-ELC-640", 4], ["LT-REN-810", 2], ["LT-SRV-001", 1]], sched: SCHED_LC, status: "Confirmed", prod: "Ready to Ship", prodStart: day(-60), prodTarget: day(-2), paid: [1], orderDate: day(-75), ...EXPORT,
+    lc: { lcNo: "KCB-ILC-26-01733", lcIssuingBank: "KCB Bank Kenya, Mombasa", lcIssueDate: day(-70), lcLatestShipment: day(9), lcExpiryDate: day(24), lcNotes: "Irrevocable, at sight, partial shipment not allowed. Dokumen: Commercial Invoice, Packing List, B/L, COO, Pre-export Verification of Conformity (PVoC)." } },
   { key: "E", cust: "PTN", seq: 905, lines: [["LT-HVAC-110", 2], ["LT-HVAC-350", 1], ["LT-SRV-001", 1]], sched: SCHED_30, status: "Installed", prod: "Ready to Ship", prodStart: day(-200), prodTarget: day(-140), paid: [1, 1], orderDate: day(-220), bastNo: "BAST/PTN/2026/014", bastDate: day(-95), serials: { "LT-HVAC-110": "RT110-2603-0041, RT110-2603-0042", "LT-HVAC-350": "CH350-2602-0007" } },
 ];
 const soId = k => `${P}SO-${k}`;
@@ -109,12 +126,13 @@ async function seedLabtech() {
   // Produk lama (alat laboratorium) dinonaktifkan, tidak dihapus.
   const off = await prisma.product.updateMany({ where: { id: { startsWith: "DEMO-PRD-LPI-" } }, data: { isActive: false } });
   for (const p of PRODUCTS) {
-    const data = { sku: p.sku, name: p.name, category: p.category, brand: "Labtech", model: p.model, unit: p.unit || "Unit", price: p.price, availability: p.category === "Jasa" ? "Ready" : "Indent", leadTimeWeeks: p.leadTimeWeeks ?? null, warrantyMonths: p.warrantyMonths ?? 12, requiresCalibration: false, specs: p.specs, isActive: true };
+    const data = { sku: p.sku, name: p.name, category: p.category, brand: "Labtech", model: p.model, unit: p.unit || "Unit", price: p.price, availability: p.category === "Jasa" ? "Ready" : "Indent", leadTimeWeeks: p.leadTimeWeeks ?? null, warrantyMonths: p.warrantyMonths ?? 12, requiresCalibration: false, specs: p.specs, isActive: true, hsCode: p.category === "Jasa" ? null : HS_TRAINER };
     await prisma.product.upsert({ where: { id: prodId(p.sku) }, update: data, create: { id: prodId(p.sku), ...data, createdAt: day(-400) } });
   }
 
   for (const [i, c] of CUSTOMERS.entries()) {
-    const { key, ...data } = c;
+    const { key, ...rest } = c;
+    const data = { country: "Indonesia", currency: "IDR", ...rest };
     await prisma.customer.upsert({ where: { id: custId(key) }, update: data, create: { id: custId(key), customerNo: `CUS-LT-${String(i + 1).padStart(3, "0")}`, ...data, createdAt: day(-300), historyJson: hist([300, SALES, "Customer didaftarkan"]) } });
   }
 
@@ -128,15 +146,18 @@ async function seedLabtech() {
     const data = { ...o, salesName: SALES, notes: null, lostReason: null };
     await prisma.opportunity.upsert({ where: { id: o.id }, update: data, create: { ...data, createdAt: day(-30), historyJson: hist([30, SALES, "Opportunity dibuat"]) } });
   }
-  const qItems = items([["LT-BIO-910", 3], ["LT-SRV-001", 1]], "Q").map(it => ({ ...it, id: it.id.replace("SOI", "QI"), discountPercent: 0, specs: prod(it.productId.replace(`${P}PRD-`, "")).specs }));
+  const qItems = items([["LT-BIO-910", 3], ["LT-SRV-001", 1]], "Q", USD_RATE).map(it => ({ ...it, id: it.id.replace("SOI", "QI"), discountPercent: 0, specs: prod(it.productId.replace(`${P}PRD-`, "")).specs }));
   const qSub = qItems.reduce((s, i) => s + i.lineTotal, 0);
   const qDisc = 12;
-  const qDiscAmt = Math.round(qSub * qDisc / 100);
-  const qTax = Math.round((qSub - qDiscAmt) * TAX / 100);
+  const qDiscAmt = round2(qSub * qDisc / 100);
+  const qTax = 0; // ekspor: PPN 0%
   const qData = {
     quotationNo: no("QUO", 901), revision: 0, customerId: custId("ANC"), opportunityId: `${P}OPP-3`, date: day(-2), validUntil: day(28), status: "Waiting Approval",
-    subject: "Penawaran Biomedical Technology Training Lab", attention: "Eng. Khaled Haddad", subtotal: qSub, discountPercent: qDisc, discountAmount: qDiscAmt, taxPercent: TAX, taxAmount: qTax, total: qSub - qDiscAmt + qTax,
-    paymentTerms: "100% L/C at sight, dibayar sebelum pengiriman.", deliveryTerms: "CIF Aqaba Port. Produksi 12 minggu setelah L/C terbit.", warrantyTerms: "Garansi 12 bulan sejak BAST instalasi & training.",
+    attention: "Eng. Khaled Haddad", subtotal: round2(qSub), discountPercent: qDisc, discountAmount: qDiscAmt, taxPercent: 0, taxAmount: qTax, total: round2(qSub - qDiscAmt + qTax), currency: "USD", exchangeRate: USD_RATE,
+    subject: "Quotation for Biomedical Technology Training Lab",
+    introText: "Dear Sir/Madam,\n\nPT Labtech Penta International, a manufacturer of technical and vocational (TVET) training equipment based in Batam, Indonesia, is pleased to submit our quotation for a Biomedical Equipment Maintenance Training Lab as per your RFP UNGM-RFP-26-8812.",
+    closingText: "Prices include export packing, installation, commissioning and Training of Trainers at site. Local taxes and import duties in Jordan are excluded.\n\nThank you for your kind attention. We look forward to your favourable reply.",
+    paymentTerms: "100% by irrevocable L/C at sight, to be honoured before shipment.", deliveryTerms: "CIF Aqaba Port, Jordan (Incoterms 2020). Production 12 weeks after L/C opening.", warrantyTerms: "12 months warranty for parts and service from the date of installation & training handover.",
     salesName: SALES, createdBy: SALES, createdAt: day(-2),
   };
   await prisma.quotation.upsert({ where: { id: `${P}QUO-1` }, update: qData, create: { id: `${P}QUO-1`, ...qData, historyJson: hist([2, SALES, "Penawaran dibuat"], [1, SALES, "Diajukan untuk persetujuan diskon"]) } });
@@ -145,14 +166,19 @@ async function seedLabtech() {
 
   // Sales order + invoice + pembayaran
   for (const o of ORDERS) {
-    const its = items(o.lines, o.key);
-    const t = totals(its);
+    const rate = o.rate ?? 1;
+    const tax = o.tax ?? TAX;
+    const its = items(o.lines, o.key, rate);
+    const t = totals(its, tax, rate);
     const c = custByKey(o.cust);
     const data = {
       soNo: no("SO", o.seq), customerId: custId(o.cust), customerPoNo: `PO/${o.cust}/2026/${o.seq}`, customerPoDate: o.orderDate, orderDate: o.orderDate, status: o.status,
       contractReviewJson: JSON.stringify(REVIEW), deliveryAddress: c.address, expectedDelivery: o.prodTarget, ...t, paymentScheduleJson: JSON.stringify(o.sched), salesName: SALES,
       productionStatus: o.prod, productionStart: o.prodStart, productionTarget: o.prodTarget, productionNotes: o.prod === "In Production" ? "Perakitan panel PV & HMI berjalan; QC dijadwalkan minggu depan." : null,
       bastNo: o.bastNo ?? null, bastDate: o.bastDate ?? null, installationDate: o.bastDate ?? null,
+      currency: o.currency ?? "IDR", exchangeRate: rate, taxPercent: tax,
+      lcNo: null, lcIssuingBank: null, lcIssueDate: null, lcLatestShipment: null, lcExpiryDate: null, lcAmount: null, lcNotes: null,
+      ...(o.lc ? { ...o.lc, lcAmount: t.total } : {}),
     };
     await prisma.salesOrder.upsert({ where: { id: soId(o.key) }, update: data, create: { id: soId(o.key), ...data, createdAt: o.orderDate, historyJson: hist([40, SALES, `Dibuat dari PO ${data.customerPoNo}`], [38, MGR, "Status: Contract Review → Confirmed"]) } });
     await prisma.salesOrderItem.deleteMany({ where: { salesOrderId: soId(o.key) } });
@@ -162,16 +188,16 @@ async function seedLabtech() {
       const frac = o.paid[ti];
       if (frac === null || frac === undefined) continue;
       const invId = `${P}INV-${o.key}-${ti}`;
-      const subtotal = Math.round(t.subtotal * term.percent / 100);
-      const taxAmount = Math.round(subtotal * TAX / 100);
-      const total = subtotal + taxAmount;
-      const paidAmount = Math.round(total * frac);
+      const subtotal = rnd(t.subtotal * term.percent / 100, rate);
+      const taxAmount = rnd(subtotal * tax / 100, rate);
+      const total = rnd(subtotal + taxAmount, rate);
+      const paidAmount = rnd(total * frac, rate);
       const invDate = ti === 0 ? day(-35) : day(-8);
-      const inv = { invoiceNo: no("INV", o.seq * 10 + ti - 8000), customerId: custId(o.cust), salesOrderId: soId(o.key), termLabel: term.label, termPercent: term.percent, invoiceDate: invDate, dueDate: ti === 0 ? day(-5) : day(22), subtotal, taxAmount, total, paidAmount, status: frac >= 1 ? "Paid" : frac > 0 ? "Partial" : "Unpaid" };
+      const inv = { invoiceNo: no("INV", o.seq * 10 + ti - 8000), customerId: custId(o.cust), salesOrderId: soId(o.key), termLabel: term.label, termPercent: term.percent, invoiceDate: invDate, dueDate: ti === 0 ? day(-5) : day(22), subtotal, taxAmount, total, paidAmount, status: frac >= 1 ? "Paid" : frac > 0 ? "Partial" : "Unpaid", currency: o.currency ?? "IDR", exchangeRate: rate, taxPercent: tax };
       await prisma.invoice.upsert({ where: { id: invId }, update: inv, create: { id: invId, ...inv, createdAt: invDate, historyJson: hist([35, FIN, `Invoice ${term.label}`]) } });
       await prisma.payment.deleteMany({ where: { invoiceId: invId } });
       if (paidAmount > 0) {
-        await prisma.payment.create({ data: { id: `${P}PAY-${o.key}-${ti}`, invoiceId: invId, paymentDate: day(ti === 0 ? -30 : -4), amount: paidAmount, method: o.sched === SCHED_LC ? "L/C" : "Transfer", reference: o.sched === SCHED_LC ? "L/C No. ARB-LC-26-00419 (Arab Bank)" : `TRF-${o.cust}-${ti + 1}`, receivedBy: FIN, createdAt: day(-4), receiptNo: no("KWT", o.seq * 10 + ti - 8000) } });
+        await prisma.payment.create({ data: { id: `${P}PAY-${o.key}-${ti}`, invoiceId: invId, paymentDate: day(ti === 0 ? -30 : -4), amount: paidAmount, method: o.sched === SCHED_LC ? "L/C" : "Transfer", reference: o.lc ? `L/C No. ${o.lc.lcNo} (${o.lc.lcIssuingBank})` : `TRF-${o.cust}-${ti + 1}`, receivedBy: FIN, createdAt: day(-4), receiptNo: no("KWT", o.seq * 10 + ti - 8000) } });
       }
     }
   }
@@ -192,6 +218,9 @@ async function seedLabtech() {
     { id: `${P}SHP-D`, shipmentNo: no("SHP", 903), so: "D", cust: "ANC", scope: "Ekspor", incoterm: "CIF", mode: "Laut", forwarder: "Batam Global Freight", origin: "Batam (Batu Ampar)", destination: "Aqaba Port, Jordan → Amman", etd: day(-32), eta: day(-6), awbNo: "BGF-BTH-AQJ-0326-551", vessel: "MSC Leandra / via Port Klang", containerNo: "MSCU 724119-3 (20' GP)", status: "Arrived", shippedAt: day(-32), arrivedAt: day(-4), receivedBy: "Eng. Khaled Haddad",
       packagesJson: crates([["C-01", "2 Unit Trainer Sistem Refrigerasi Dasar", "160×90×170", 420, 360], ["C-02", "2 Unit Trainer Sistem Refrigerasi Dasar", "160×90×170", 420, 360], ["C-03", "2 Unit Trainer AC Split Inverter", "180×100×170", 510, 440]]), docsJson: docs(EXP, 8),
       history: [[40, SHIP, "Shipment dibuat"], [33, SHIP, "Dirilis untuk dikirim (order lunas)"], [32, SHIP, "Dikirim"], [4, SHIP, "Tiba di client, diterima Eng. Khaled Haddad"]] },
+    { id: `${P}SHP-F`, shipmentNo: no("SHP", 905), so: "F", cust: "KEN", scope: "Ekspor", incoterm: "FOB", mode: "Laut", forwarder: "Batam Global Freight", origin: "Batam", destination: "Port of Mombasa, Kenya", etd: day(6), eta: day(30), vessel: "Maersk Kensington / via Singapore", containerNo: "MSKU 551870-2 (40' HC)", status: "Ready",
+      packagesJson: crates([["C-01", "4 Unit Trainer PLC & Otomasi Industri", "160×100×140", 560, 470], ["C-02", "2 Unit Trainer Pembangkit Listrik Tenaga Surya", "220×130×160", 690, 590]]), docsJson: docs(EXP, 3),
+      history: [[6, SHIP, "Shipment dibuat"], [2, SHIP, "Dirilis untuk dikirim (order lunas via L/C)"]] },
     { id: `${P}SHP-E`, shipmentNo: no("SHP", 904), so: "E", cust: "PTN", scope: "Domestik", incoterm: "Franco", mode: "Darat", forwarder: "PT Trans Jawa Cargo", destination: custByKey("PTN").address, etd: day(-120), eta: day(-112), awbNo: "TJC-26-04419", status: "Arrived", shippedAt: day(-120), arrivedAt: day(-111), receivedBy: "Ir. Dedi Kurniadi, M.T.",
       packagesJson: crates([["C-01", "2 Unit Trainer Sistem Refrigerasi Dasar", "160×90×170", 420, 360], ["C-02", "1 Unit Trainer Chiller & Cooling Tower", "240×160×190", 1150, 980]]), docsJson: docs(DOM, 3),
       history: [[125, SHIP, "Shipment dibuat"], [120, SHIP, "Dikirim"], [111, SHIP, "Tiba di client"]] },

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Pencil, Receipt, ShoppingCart, Target } from "lucide-react";
-import { contractState, invoiceState, rupiah, rupiahShort } from "../../lib";
+import { contractState, invoiceState, isExportCustomer, rupiahShort, toIdr, money } from "../../lib";
 import { Card, History, InfoRow, StatCard, StatusBadge, btnSecondary } from "../../ui";
 import CustomerModal, { type CustomerFormValue } from "../CustomerModal";
 
@@ -12,9 +12,10 @@ type C = {
   contactEmail: string | null; contactPhone: string | null; paymentTerms: string; notes: string | null; historyJson: string;
   signatoryName: string | null; signatoryTitle: string | null;
   opportunities: { id: string; opportunityNo: string; title: string; stage: string; estimatedValue: number }[];
-  quotations: { id: string; quotationNo: string; revision: number; subject: string; date: string; status: string; total: number }[];
-  salesOrders: { id: string; soNo: string; customerPoNo: string; orderDate: string; status: string; total: number }[];
-  invoices: { id: string; invoiceNo: string; termLabel: string; dueDate: string; status: string; total: number; paidAmount: number }[];
+  quotations: { id: string; quotationNo: string; revision: number; subject: string; date: string; status: string; total: number; currency: string }[];
+  salesOrders: { id: string; soNo: string; customerPoNo: string; orderDate: string; status: string; total: number; currency: string; exchangeRate: number }[];
+  invoices: { id: string; invoiceNo: string; termLabel: string; dueDate: string; status: string; total: number; paidAmount: number; currency: string; exchangeRate: number }[];
+  country: string; currency: string;
   contracts: { id: string; contractNo: string; title: string; type: string; endDate: string; status: string }[];
 };
 
@@ -22,8 +23,8 @@ const n = (v: string | null) => v ?? undefined;
 
 export default function CustomerDetail({ c, canManage }: { c: C; canManage: boolean }) {
   const [editing, setEditing] = useState<CustomerFormValue | null>(null);
-  const revenue = c.salesOrders.filter(s => s.status !== "Cancelled").reduce((s, o) => s + o.total, 0);
-  const outstanding = c.invoices.filter(i => !["Paid", "Cancelled"].includes(i.status)).reduce((s, i) => s + i.total - i.paidAmount, 0);
+  const revenue = c.salesOrders.filter(s => s.status !== "Cancelled").reduce((s, o) => s + toIdr(o.total, o), 0);
+  const outstanding = c.invoices.filter(i => !["Paid", "Cancelled"].includes(i.status)).reduce((s, i) => s + toIdr(i.total - i.paidAmount, i), 0);
   const pipeline = c.opportunities.filter(o => !["Won", "Lost"].includes(o.stage)).reduce((s, o) => s + o.estimatedValue, 0);
 
   return (
@@ -32,13 +33,13 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
         <div>
           <Link href="/modules/sales/customers" className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Customers</Link>
           <h2 className="text-xl font-bold text-slate-800 mt-1">{c.name}</h2>
-          <p className="text-sm text-slate-500">{c.customerNo} · {c.type}{c.city ? ` · ${c.city}` : ""}</p>
+          <p className="text-sm text-slate-500">{c.customerNo} · {c.type}{c.city ? ` · ${c.city}` : ""}{isExportCustomer(c) ? ` · ${c.country} · ekspor (${c.currency})` : ""}</p>
         </div>
         {canManage && (
           <button className={btnSecondary} onClick={() => setEditing({
             id: c.id, name: c.name, type: c.type, npwp: n(c.npwp), address: n(c.address), city: n(c.city), contactName: n(c.contactName), contactTitle: n(c.contactTitle),
             contactEmail: n(c.contactEmail), contactPhone: n(c.contactPhone), paymentTerms: c.paymentTerms, notes: n(c.notes),
-            signatoryName: n(c.signatoryName), signatoryTitle: n(c.signatoryTitle),
+            signatoryName: n(c.signatoryName), signatoryTitle: n(c.signatoryTitle), country: c.country, currency: c.currency,
           })}><Pencil className="w-4 h-4" /> Edit</button>
         )}
       </div>
@@ -56,7 +57,7 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
               <ul className="divide-y divide-slate-100">{c.quotations.map(q => (
                 <li key={q.id}><Link href={`/modules/sales/quotations/${q.id}`} className="flex justify-between gap-3 py-2 hover:bg-slate-50 -mx-2 px-2 rounded-lg text-sm">
                   <span className="min-w-0"><span className="font-semibold text-slate-800">{q.quotationNo} Rev.{q.revision}</span><span className="block text-xs text-slate-500 truncate">{q.date} · {q.subject}</span></span>
-                  <span className="flex items-center gap-2 shrink-0"><span className="tabular-nums">{rupiah(q.total)}</span><StatusBadge status={q.status} /></span>
+                  <span className="flex items-center gap-2 shrink-0"><span className="tabular-nums">{money(q.total, q.currency)}</span><StatusBadge status={q.status} /></span>
                 </Link></li>))}</ul>
             )}
           </Card>
@@ -65,7 +66,7 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
               <ul className="divide-y divide-slate-100">{c.salesOrders.map(s => (
                 <li key={s.id}><Link href={`/modules/sales/orders/${s.id}`} className="flex justify-between gap-3 py-2 hover:bg-slate-50 -mx-2 px-2 rounded-lg text-sm">
                   <span><span className="font-semibold text-slate-800">{s.soNo}</span><span className="block text-xs text-slate-500">{s.orderDate} · PO {s.customerPoNo}</span></span>
-                  <span className="flex items-center gap-2 shrink-0"><span className="tabular-nums">{rupiah(s.total)}</span><StatusBadge status={s.status} /></span>
+                  <span className="flex items-center gap-2 shrink-0"><span className="tabular-nums">{money(s.total, s.currency)}</span><StatusBadge status={s.status} /></span>
                 </Link></li>))}</ul>
             )}
           </Card>
@@ -74,7 +75,7 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
               <ul className="divide-y divide-slate-100">{c.invoices.map(i => (
                 <li key={i.id}><Link href={`/modules/sales/invoices/${i.id}`} className="flex justify-between gap-3 py-2 hover:bg-slate-50 -mx-2 px-2 rounded-lg text-sm">
                   <span><span className="font-semibold text-slate-800">{i.invoiceNo}</span><span className="block text-xs text-slate-500">{i.termLabel} · jatuh tempo {i.dueDate}</span></span>
-                  <span className="flex items-center gap-2 shrink-0"><span className="tabular-nums">{rupiah(i.total)}</span><StatusBadge status={invoiceState(i)} /></span>
+                  <span className="flex items-center gap-2 shrink-0"><span className="tabular-nums">{money(i.total, i.currency)}</span><StatusBadge status={invoiceState(i)} /></span>
                 </Link></li>))}</ul>
             )}
           </Card>

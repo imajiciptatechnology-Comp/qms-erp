@@ -6,10 +6,10 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import VoiceButton from "@/components/VoiceButton";
 import { aiDraftQuotation, createQuotation, updateQuotation, type QuotationInput } from "../actions";
-import { DISCOUNT_APPROVAL_LIMIT, TAX_PERCENT, addDays, computeTotals, lineTotal, needsApproval, rupiah, today, type LineInput } from "../lib";
+import { CURRENCIES, DEFAULT_RATES, DISCOUNT_APPROVAL_LIMIT, TAX_PERCENT, addDays, computeTotals, defaultTaxFor, fromIdr, isExportCustomer, lineTotal, money, needsApproval, rupiah, today, type LineInput } from "../lib";
 import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
 
-type Customer = { id: string; name: string; contactName: string | null; paymentTerms: string; type: string };
+type Customer = { id: string; name: string; contactName: string | null; paymentTerms: string; type: string; country: string; currency: string };
 type Product = { id: string; sku: string; name: string; brand: string; model: string | null; unit: string; price: number; specs: string | null; category: string; availability: string };
 type Opp = { id: string; opportunityNo: string; title: string; customerId: string };
 
@@ -25,6 +25,7 @@ export default function QuotationForm({ customers, products, opportunities, init
     // Teks surat & syarat sengaja kosong: diisi AI, atau teks baku saat disimpan (lihat fillQuotationDefaults).
     introText: "", closingText: "", discountPercent: 0,
     paymentTerms: "", deliveryTerms: "", warrantyTerms: "", notes: "", items: [emptyLine()],
+    currency: "IDR", exchangeRate: 1, taxPercent: TAX_PERCENT,
   });
   const [aiRequest, setAiRequest] = useState("");
   const [aiPending, setAiPending] = useState(false);
@@ -33,18 +34,34 @@ export default function QuotationForm({ customers, products, opportunities, init
   const set = <K extends keyof QuotationInput>(k: K, v: QuotationInput[K]) => setForm(f => ({ ...f, [k]: v }));
   const setLine = (i: number, patch: Partial<LineInput>) => setForm(f => ({ ...f, items: f.items.map((l, idx) => idx === i ? { ...l, ...patch } : l) }));
 
-  const totals = useMemo(() => computeTotals(form.items.filter(l => l.description), form.discountPercent), [form.items, form.discountPercent]);
+  const cur = form.currency || "IDR";
+  const rate = form.exchangeRate || 1;
+  const taxPercent = form.taxPercent ?? TAX_PERCENT;
+  const fmt = (n: number) => money(n, cur);
+  const totals = useMemo(() => computeTotals(form.items.filter(l => l.description), form.discountPercent, taxPercent, cur), [form.items, form.discountPercent, taxPercent, cur]);
   const approval = needsApproval(form.discountPercent, form.items);
   const custOpps = opportunities.filter(o => o.customerId === form.customerId);
+  const customer = customers.find(c => c.id === form.customerId);
+
+  /** Harga item yang berasal dari master produk selalu dihitung ulang dari harga master (Rupiah) dengan kurs. */
+  const reprice = (items: LineInput[], currency: string, r: number) => items.map(l => {
+    const p = l.productId ? products.find(x => x.id === l.productId) : null;
+    return p ? { ...l, unitPrice: fromIdr(p.price, currency, r) } : l;
+  });
+  function setCurrency(currency: string, r: number) {
+    setForm(f => ({ ...f, currency, exchangeRate: currency === "IDR" ? 1 : r, items: reprice(f.items, currency, currency === "IDR" ? 1 : r) }));
+  }
 
   function pickCustomer(id: string) {
     const c = customers.find(x => x.id === id);
-    setForm(f => ({ ...f, customerId: id, opportunityId: null, attention: c?.contactName ?? f.attention }));
+    const currency = c?.currency || "IDR";
+    const r = currency === (form.currency || "IDR") ? rate : DEFAULT_RATES[currency] ?? 1;
+    setForm(f => ({ ...f, customerId: id, opportunityId: null, attention: c?.contactName ?? f.attention, currency, exchangeRate: currency === "IDR" ? 1 : r, taxPercent: defaultTaxFor(c), items: reprice(f.items, currency, currency === "IDR" ? 1 : r) }));
   }
   function pickProduct(i: number, id: string) {
     const p = products.find(x => x.id === id);
     if (!p) return setLine(i, { productId: null });
-    setLine(i, { productId: p.id, description: p.model ? `${p.name} — ${p.brand} ${p.model}` : `${p.name} — ${p.brand}`, specs: p.specs ?? "", unit: p.unit, unitPrice: p.price });
+    setLine(i, { productId: p.id, description: p.model ? `${p.name} — ${p.brand} ${p.model}` : `${p.name} — ${p.brand}`, specs: p.specs ?? "", unit: p.unit, unitPrice: fromIdr(p.price, cur, rate) });
   }
 
   async function runAi() {
@@ -53,7 +70,8 @@ export default function QuotationForm({ customers, products, opportunities, init
     try {
       const res = await aiDraftQuotation({ customerId: form.customerId, request: aiRequest, opportunityId: form.opportunityId });
       if (!res.success) return setAiError(res.message);
-      setForm(res.draft);
+      // Draft AI berharga Rupiah dari master: ikutkan valuta, kurs, dan PPN yang sedang dipilih.
+      setForm({ ...res.draft, currency: cur, exchangeRate: rate, taxPercent, items: reprice(res.draft.items, cur, rate) });
       setAiInfo({ explanation: res.explanation, references: res.references, unmatched: res.unmatched });
     } catch {
       setAiError("Gagal menghubungi AI. Coba lagi.");
@@ -78,7 +96,7 @@ export default function QuotationForm({ customers, products, opportunities, init
             <label className={labelCls} htmlFor="q-cust">Customer</label>
             <select id="q-cust" required value={form.customerId} onChange={e => pickCustomer(e.target.value)} className={inputCls}>
               <option value="" disabled>Pilih customer</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
+              {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.type}{isExportCustomer(c) ? ` · ${c.country}` : ""})</option>)}
             </select>
           </div>
           <div className="xl:col-span-2">
@@ -104,7 +122,32 @@ export default function QuotationForm({ customers, products, opportunities, init
             <label className={labelCls} htmlFor="q-valid">Berlaku sampai</label>
             <input id="q-valid" type="date" required min={form.date} value={form.validUntil} onChange={e => set("validUntil", e.target.value)} className={inputCls} />
           </div>
+          <div>
+            <label className={labelCls} htmlFor="q-cur">Mata uang</label>
+            <select id="q-cur" value={cur} onChange={e => setCurrency(e.target.value, DEFAULT_RATES[e.target.value] ?? 1)} className={inputCls}>
+              {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {cur !== "IDR" && (
+            <div>
+              <label className={labelCls} htmlFor="q-rate">Kurs (Rp per 1 {cur})</label>
+              <input id="q-rate" type="number" min={1} step="any" required value={rate} onChange={e => setCurrency(cur, Number(e.target.value))} className={inputCls} />
+            </div>
+          )}
+          <div>
+            <label className={labelCls} htmlFor="q-tax">PPN</label>
+            <select id="q-tax" value={taxPercent} onChange={e => set("taxPercent", Number(e.target.value))} className={inputCls}>
+              <option value={TAX_PERCENT}>PPN {TAX_PERCENT}% (domestik)</option>
+              <option value={0}>PPN 0% (ekspor)</option>
+            </select>
+          </div>
         </div>
+        {(cur !== "IDR" || (customer && isExportCustomer(customer))) && (
+          <p className="mt-3 text-xs text-slate-500">
+            {customer && isExportCustomer(customer) ? `Customer ekspor (${customer.country}): dokumen dicetak berbahasa Inggris. ` : ""}
+            {cur !== "IDR" ? `Harga item dari master produk dikonversi dari Rupiah dengan kurs ${rupiah(rate)} per ${cur}; kurs awal hanya perkiraan, sesuaikan dengan kurs hari ini.` : ""}
+          </p>
+        )}
       </Card>
 
       {!quotationId && (
@@ -151,7 +194,7 @@ export default function QuotationForm({ customers, products, opportunities, init
                       <option value="">— Item bebas / ketik manual —</option>
                       {categories.map(cat => (
                         <optgroup key={cat} label={cat}>
-                          {products.filter(p => p.category === cat).map(p => <option key={p.id} value={p.id}>{p.sku} · {p.name} ({rupiah(p.price)}{p.availability === "Indent" ? ", indent" : ""})</option>)}
+                          {products.filter(p => p.category === cat).map(p => <option key={p.id} value={p.id}>{p.sku} · {p.name} ({fmt(fromIdr(p.price, cur, rate))}{p.availability === "Indent" ? ", indent" : ""})</option>)}
                         </optgroup>
                       ))}
                     </select>
@@ -172,9 +215,9 @@ export default function QuotationForm({ customers, products, opportunities, init
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pl-8">
                 <div><label className={labelCls} htmlFor={`qty-${i}`}>Qty</label><input id={`qty-${i}`} type="number" min={0.01} step="any" value={l.qty} onChange={e => setLine(i, { qty: Number(e.target.value) })} className={inputCls} /></div>
                 <div><label className={labelCls} htmlFor={`u-${i}`}>Satuan</label><input id={`u-${i}`} value={l.unit} onChange={e => setLine(i, { unit: e.target.value })} className={inputCls} /></div>
-                <div><label className={labelCls} htmlFor={`pr-${i}`}>Harga satuan</label><input id={`pr-${i}`} type="number" min={0} step={1000} value={l.unitPrice} onChange={e => setLine(i, { unitPrice: Number(e.target.value) })} className={inputCls} /></div>
+                <div><label className={labelCls} htmlFor={`pr-${i}`}>Harga satuan</label><input id={`pr-${i}`} type="number" min={0} step={cur === "IDR" ? 1000 : 0.01} value={l.unitPrice} onChange={e => setLine(i, { unitPrice: Number(e.target.value) })} className={inputCls} /></div>
                 <div><label className={labelCls} htmlFor={`dc-${i}`}>Diskon %</label><input id={`dc-${i}`} type="number" min={0} max={100} step={0.5} value={l.discountPercent ?? 0} onChange={e => setLine(i, { discountPercent: Number(e.target.value) })} className={inputCls} /></div>
-                <div><span className={labelCls}>Jumlah</span><p className="py-2 text-sm font-semibold text-slate-800 tabular-nums">{rupiah(lineTotal(l))}</p></div>
+                <div><span className={labelCls}>Jumlah</span><p className="py-2 text-sm font-semibold text-slate-800 tabular-nums">{fmt(lineTotal(l, cur))}</p></div>
               </div>
             </div>
           ))}
@@ -182,15 +225,15 @@ export default function QuotationForm({ customers, products, opportunities, init
 
         <div className="mt-5 flex flex-col md:flex-row md:justify-end gap-6">
           <dl className="w-full md:w-96 text-sm space-y-1.5">
-            <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd className="tabular-nums text-slate-800">{rupiah(totals.subtotal)}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">Subtotal</dt><dd className="tabular-nums text-slate-800">{fmt(totals.subtotal)}</dd></div>
             <div className="flex justify-between items-center gap-3">
               <dt className="text-slate-500 flex items-center gap-2"><label htmlFor="q-disc">Diskon tambahan %</label>
                 <input id="q-disc" type="number" min={0} max={100} step={0.5} value={form.discountPercent} onChange={e => set("discountPercent", Number(e.target.value))} className="w-20 px-2 py-1 border border-slate-200 rounded-md text-sm text-slate-900" />
               </dt>
-              <dd className="tabular-nums text-slate-800">− {rupiah(totals.discountAmount)}</dd>
+              <dd className="tabular-nums text-slate-800">− {fmt(totals.discountAmount)}</dd>
             </div>
-            <div className="flex justify-between"><dt className="text-slate-500">PPN {TAX_PERCENT}%</dt><dd className="tabular-nums text-slate-800">{rupiah(totals.taxAmount)}</dd></div>
-            <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold"><dt className="text-slate-800">Total</dt><dd className="tabular-nums text-slate-900">{rupiah(totals.total)}</dd></div>
+            <div className="flex justify-between"><dt className="text-slate-500">PPN {taxPercent}%</dt><dd className="tabular-nums text-slate-800">{fmt(totals.taxAmount)}</dd></div>
+            <div className="flex justify-between border-t border-slate-200 pt-2 text-base font-bold"><dt className="text-slate-800">Total</dt><dd className="tabular-nums text-slate-900">{fmt(totals.total)}</dd></div>
           </dl>
         </div>
         {approval && (

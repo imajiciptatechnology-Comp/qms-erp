@@ -5,10 +5,10 @@ import Link from "next/link";
 import { Plus, Receipt, Search } from "lucide-react";
 import EmptyTableRow from "@/components/ui/EmptyTableRow";
 import TableFooter from "@/components/ui/TableFooter";
-import { daysBetween, invoiceState, rupiah, rupiahShort, today } from "../lib";
+import { daysBetween, invoiceState, rupiahShort, toIdr, today, money } from "../lib";
 import { StatusBadge, btnPrimary, inputCls } from "../ui";
 
-type Row = { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string; customer: { name: string }; salesOrder: { soNo: string } | null };
+type Row = { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string; currency: string; exchangeRate: number; customer: { name: string }; salesOrder: { soNo: string } | null };
 
 /** Umur piutang dihitung dari jatuh tempo. */
 const BUCKETS = [
@@ -25,7 +25,8 @@ export default function InvoiceList({ invoices, canFinance }: { invoices: Row[];
   const openRows = rows.filter(r => r.outstanding > 0);
   const aging = BUCKETS.map(b => {
     const list = openRows.filter(r => b.test(daysBetween(r.dueDate, today())));
-    return { ...b, count: list.length, amount: list.reduce((s, r) => s + r.outstanding, 0) };
+    // Umur piutang dijumlah dalam Rupiah (invoice valuta asing dikonversi dengan kurs pada invoice).
+    return { ...b, count: list.length, amount: list.reduce((s, r) => s + toIdr(r.outstanding, r), 0) };
   });
 
   const filtered = rows.filter(r => {
@@ -75,8 +76,8 @@ export default function InvoiceList({ invoices, canFinance }: { invoices: Row[];
                   <td className="px-6 py-4"><Link href={`/modules/sales/invoices/${r.id}`} className="font-bold text-slate-700 hover:text-blue-700 whitespace-nowrap">{r.invoiceNo}</Link><p className="text-xs text-slate-500">{r.termLabel}</p></td>
                   <td className="px-6 py-4"><p className="font-semibold text-slate-800">{r.customer.name}</p><p className="text-xs text-slate-500">{r.salesOrder?.soNo ?? "Tanpa SO"}</p></td>
                   <td className="px-6 py-4 whitespace-nowrap">{r.dueDate}{r.state === "Overdue" && <p className="text-xs text-red-700">{daysBetween(r.dueDate, today())} hari lewat</p>}</td>
-                  <td className="px-6 py-4 text-right tabular-nums whitespace-nowrap">{rupiah(r.total)}</td>
-                  <td className="px-6 py-4 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">{rupiah(r.outstanding)}</td>
+                  <td className="px-6 py-4 text-right tabular-nums whitespace-nowrap">{money(r.total, r.currency)}</td>
+                  <td className="px-6 py-4 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">{money(r.outstanding, r.currency)}</td>
                   <td className="px-6 py-4"><StatusBadge status={r.state} /></td>
                 </tr>
               )) : <EmptyTableRow colSpan={6} icon={<Receipt className="w-12 h-12 text-slate-200" />} title="Tidak ada invoice" subtitle="Invoice diterbitkan dari halaman Sales Order per termin." />}

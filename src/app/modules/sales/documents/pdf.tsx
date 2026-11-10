@@ -64,7 +64,7 @@ const s = StyleSheet.create({
   watermark: { position: "absolute", top: 330, left: 70, fontSize: 100, fontWeight: 700, color: "#E2E8F0", transform: "rotate(-30deg)", opacity: 0.55 },
 });
 
-const WATERMARK_COLOR = { DRAFT: "#E2E8F0", LUNAS: "#D1FAE5", DIBATALKAN: "#FEE2E2" };
+const WATERMARK_COLOR = { DRAFT: "#E2E8F0", LUNAS: "#D1FAE5", DIBATALKAN: "#FEE2E2", PAID: "#D1FAE5", CANCELLED: "#FEE2E2" };
 const align = (a?: string) => (a === "right" ? "right" : a === "center" ? "center" : "left") as "left" | "right" | "center";
 
 function CellView({ cell, width, alignment }: { cell: Cell; width: number; alignment?: string }) {
@@ -155,7 +155,7 @@ function DocPdf({ d }: { d: DocModel }) {
         {/* Footer fixed diletakkan sebelum konten mengalir. */}
         <View style={s.footer} fixed>
           <View><Text style={{ fontWeight: 600, color: C.primary }}>{L.company}</Text><Text>{L.address} · NPWP {L.npwp}</Text></View>
-          <Text render={({ pageNumber, totalPages }) => `${d.number}  ·  Hal. ${pageNumber}/${totalPages}`} />
+          <Text render={({ pageNumber, totalPages }) => `${d.number}  ·  ${d.lang === "en" ? "Page" : "Hal."} ${pageNumber}/${totalPages}`} />
         </View>
 
         <View style={s.head}>

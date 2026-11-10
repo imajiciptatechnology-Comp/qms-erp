@@ -1,7 +1,7 @@
 // Surat pengingat pembayaran: AI menulis isi surat; nomor, angka & tingkat peringatan dari data.
 import { prisma } from "@/lib/prisma";
 import { aiComplete, parseAiJson } from "@/lib/ai";
-import { daysBetween, rupiah, today } from "../lib";
+import { daysBetween, today, money } from "../lib";
 import { tanggal } from "../documents/format";
 
 export const REMINDER_LEVELS = ["", "Pengingat", "Peringatan", "Peringatan terakhir"];
@@ -33,7 +33,7 @@ Aturan: diawali "Dengan hormat,"; sebutkan nomor invoice, jatuh tempo, dan sisa 
 Jawab HANYA JSON: {"subject": string, "body": string}`;
   const user = JSON.stringify({
     customer: inv.customer.name, kontak: inv.customer.contactName,
-    invoice: { nomor: inv.invoiceNo, keterangan: inv.termLabel, poCustomer: inv.salesOrder?.customerPoNo ?? null, tanggal: tanggal(inv.invoiceDate), jatuhTempo: tanggal(inv.dueDate), total: rupiah(inv.total), sudahDibayar: rupiah(inv.paidAmount), sisa: rupiah(inv.total - inv.paidAmount) },
+    invoice: { nomor: inv.invoiceNo, keterangan: inv.termLabel, poCustomer: inv.salesOrder?.customerPoNo ?? null, tanggal: tanggal(inv.invoiceDate), jatuhTempo: tanggal(inv.dueDate), total: money(inv.total, inv.currency), sudahDibayar: money(inv.paidAmount, inv.currency), sisa: money(inv.total - inv.paidAmount, inv.currency) },
     hariTerlambat: overdue,
     suratSebelumnya: inv.reminders.map(r => ({ nomor: r.letterNo, tanggal: tanggal(r.date), tingkat: REMINDER_LEVELS[r.level] })),
     riwayatCustomer: `${history.length} invoice lunas sebelumnya, ${lateCount} di antaranya dibayar terlambat`,

@@ -6,10 +6,10 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, FileSignature, PenLine, Plus, Receipt, Trash2 } from "lucide-react";
 import { Tab, TabNav } from "@/components/ui/TabNav";
 import { createInvoiceFromContract, createManualInvoice } from "../../actions";
-import { TAX_PERCENT, computeTotals, lineTotal, rupiah, today, type LineInput } from "../../lib";
+import { CURRENCIES, DEFAULT_RATES, TAX_PERCENT, computeTotals, defaultTaxFor, fromIdr, lineTotal, money, rupiah, today, type LineInput } from "../../lib";
 import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
 
-type Customer = { id: string; name: string; paymentTerms: string };
+type Customer = { id: string; name: string; paymentTerms: string; country: string; currency: string };
 type Product = { id: string; sku: string; name: string; brand: string; model: string | null; unit: string; price: number; category: string };
 type ContractRow = {
   id: string; contractNo: string; title: string; type: string; value: number; customer: string;
@@ -28,7 +28,21 @@ export default function NewInvoiceForm({ customers, products, contracts }: { cus
   const [notes, setNotes] = useState("");
   const [items, setItems] = useState<LineInput[]>([emptyLine()]);
   const setLine = (i: number, patch: Partial<LineInput>) => setItems(list => list.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-  const totals = computeTotals(items.filter(l => l.description));
+  const [currency, setCurrency] = useState("IDR");
+  const [rate, setRate] = useState(1);
+  const [taxPercent, setTaxPercent] = useState(TAX_PERCENT);
+  const fmt = (n: number) => money(n, currency);
+  const totals = computeTotals(items.filter(l => l.description), 0, taxPercent, currency);
+  const reprice = (cur: string, r: number) => setItems(list => list.map(l => {
+    const p = l.productId ? products.find(x => x.id === l.productId) : null;
+    return p ? { ...l, unitPrice: fromIdr(p.price, cur, r) } : l;
+  }));
+  function pickCustomer(id: string) {
+    const c = customers.find(x => x.id === id);
+    const cur = c?.currency || "IDR";
+    const r = cur === "IDR" ? 1 : DEFAULT_RATES[cur] ?? 1;
+    setCustomerId(id); setCurrency(cur); setRate(r); setTaxPercent(defaultTaxFor(c)); reprice(cur, r);
+  }
   const goTo = (id?: string) => id && router.push(`/modules/sales/invoices/${id}`);
 
   return (
@@ -75,18 +89,21 @@ export default function NewInvoiceForm({ customers, products, contracts }: { cus
           )}
         </Card>
       ) : (
-        <form className="space-y-6" onSubmit={e => { e.preventDefault(); exec(() => createManualInvoice({ customerId, invoiceDate, termLabel, notes, items }), goTo); }}>
+        <form className="space-y-6" onSubmit={e => { e.preventDefault(); exec(() => createManualInvoice({ customerId, invoiceDate, termLabel, notes, items, currency, exchangeRate: rate, taxPercent }), goTo); }}>
           <Card title="Data tagihan">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className={labelCls} htmlFor="mi-cust">Customer</label>
-                <select id="mi-cust" required value={customerId} onChange={e => setCustomerId(e.target.value)} className={inputCls}>
+                <select id="mi-cust" required value={customerId} onChange={e => pickCustomer(e.target.value)} className={inputCls}>
                   <option value="" disabled>Pilih customer</option>
                   {customers.map(c => <option key={c.id} value={c.id}>{c.name} ({c.paymentTerms})</option>)}
                 </select>
               </div>
               <div><label className={labelCls} htmlFor="mi-date">Tanggal invoice</label><input id="mi-date" type="date" required value={invoiceDate} onChange={e => setInvoiceDate(e.target.value)} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="mi-term">Keterangan tagihan</label><input id="mi-term" value={termLabel} onChange={e => setTermLabel(e.target.value)} className={inputCls} placeholder="mis. Penggantian suku cadang" /></div>
+              <div><label className={labelCls} htmlFor="mi-cur">Mata uang</label><select id="mi-cur" value={currency} onChange={e => { const c = e.target.value; const r = c === "IDR" ? 1 : DEFAULT_RATES[c] ?? 1; setCurrency(c); setRate(r); reprice(c, r); }} className={inputCls}>{CURRENCIES.map(c => <option key={c}>{c}</option>)}</select></div>
+              {currency !== "IDR" ? <div><label className={labelCls} htmlFor="mi-rate">Kurs (Rp per 1 {currency})</label><input id="mi-rate" type="number" min={1} step="any" required value={rate} onChange={e => { const r = Number(e.target.value); setRate(r); reprice(currency, r); }} className={inputCls} /></div> : <div />}
+              <div><label className={labelCls} htmlFor="mi-tax">PPN</label><select id="mi-tax" value={taxPercent} onChange={e => setTaxPercent(Number(e.target.value))} className={inputCls}><option value={TAX_PERCENT}>PPN {TAX_PERCENT}% (domestik)</option><option value={0}>PPN 0% (ekspor)</option></select></div>
               <div className="md:col-span-3"><label className={labelCls} htmlFor="mi-notes">Catatan internal</label><input id="mi-notes" value={notes} onChange={e => setNotes(e.target.value)} className={inputCls} /></div>
             </div>
           </Card>
@@ -99,7 +116,7 @@ export default function NewInvoiceForm({ customers, products, contracts }: { cus
                     <label className={labelCls} htmlFor={`mi-p-${i}`}>Produk (opsional)</label>
                     <select id={`mi-p-${i}`} value={l.productId ?? ""} className={inputCls} onChange={e => {
                       const p = products.find(x => x.id === e.target.value);
-                      setLine(i, p ? { productId: p.id, description: p.model ? `${p.name} — ${p.brand} ${p.model}` : `${p.name} — ${p.brand}`, unit: p.unit, unitPrice: p.price } : { productId: null });
+                      setLine(i, p ? { productId: p.id, description: p.model ? `${p.name} — ${p.brand} ${p.model}` : `${p.name} — ${p.brand}`, unit: p.unit, unitPrice: fromIdr(p.price, currency, rate) } : { productId: null });
                     }}>
                       <option value="">— Item bebas —</option>
                       {products.map(p => <option key={p.id} value={p.id}>{p.sku} · {p.name}</option>)}
@@ -107,18 +124,18 @@ export default function NewInvoiceForm({ customers, products, contracts }: { cus
                   </div>
                   <div className="col-span-2 md:col-span-4"><label className={labelCls} htmlFor={`mi-d-${i}`}>Deskripsi</label><input id={`mi-d-${i}`} value={l.description} onChange={e => setLine(i, { description: e.target.value })} className={inputCls} required={i === 0} /></div>
                   <div className="md:col-span-1"><label className={labelCls} htmlFor={`mi-q-${i}`}>Qty</label><input id={`mi-q-${i}`} type="number" min={0.01} step="any" value={l.qty} onChange={e => setLine(i, { qty: Number(e.target.value) })} className={inputCls} /></div>
-                  <div className="md:col-span-2"><label className={labelCls} htmlFor={`mi-pr-${i}`}>Harga satuan</label><input id={`mi-pr-${i}`} type="number" min={0} step={1000} value={l.unitPrice} onChange={e => setLine(i, { unitPrice: Number(e.target.value) })} className={inputCls} /></div>
+                  <div className="md:col-span-2"><label className={labelCls} htmlFor={`mi-pr-${i}`}>Harga satuan</label><input id={`mi-pr-${i}`} type="number" min={0} step={currency === "IDR" ? 1000 : 0.01} value={l.unitPrice} onChange={e => setLine(i, { unitPrice: Number(e.target.value) })} className={inputCls} /></div>
                   <div className="md:col-span-1 flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold tabular-nums text-slate-800 sr-only md:not-sr-only">{rupiah(lineTotal(l))}</span>
+                    <span className="text-sm font-semibold tabular-nums text-slate-800 sr-only md:not-sr-only">{fmt(lineTotal(l, currency))}</span>
                     {items.length > 1 && <button type="button" onClick={() => setItems(items.filter((_, idx) => idx !== i))} className="p-2 text-red-500 hover:bg-red-50 rounded-md" aria-label={`Hapus item ${i + 1}`}><Trash2 className="w-4 h-4" /></button>}
                   </div>
                 </div>
               ))}
             </div>
             <dl className="ml-auto w-full sm:w-80 mt-5 space-y-1.5 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">DPP</dt><dd className="tabular-nums">{rupiah(totals.subtotal)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">PPN {TAX_PERCENT}%</dt><dd className="tabular-nums">{rupiah(totals.taxAmount)}</dd></div>
-              <div className="flex justify-between font-bold border-t border-slate-200 pt-1.5"><dt>Total</dt><dd className="tabular-nums">{rupiah(totals.total)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">DPP</dt><dd className="tabular-nums">{fmt(totals.subtotal)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">PPN {taxPercent}%</dt><dd className="tabular-nums">{fmt(totals.taxAmount)}</dd></div>
+              <div className="flex justify-between font-bold border-t border-slate-200 pt-1.5"><dt>Total</dt><dd className="tabular-nums">{fmt(totals.total)}</dd></div>
             </dl>
           </Card>
 

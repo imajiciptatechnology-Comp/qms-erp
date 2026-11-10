@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Ban, CheckCircle2, CheckSquare, Lock, PackageCheck, Pencil, Plus, Send, ShieldQuestion, Ship, Square, X } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
-import { EXCEPTION_LABEL, PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, invoiceState, rupiah, today, type CratePackage } from "@/app/modules/sales/lib";
+import { EXCEPTION_LABEL, PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, invoiceState, lcState, today, type CratePackage, money } from "@/app/modules/sales/lib";
 import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "@/app/modules/sales/ui";
 import { addShipmentDoc, cancelShipment, decideShipmentException, markArrived, markShipped, releaseShipment, requestShipmentException, toggleShipmentDoc } from "../../actions";
 
@@ -16,8 +16,9 @@ type Shipment = {
   notes: string | null; createdBy: string; createdAt: string; historyJson: string;
   customer: { id: string; name: string };
   salesOrder: {
-    id: string; soNo: string; customerPoNo: string; total: number; productionStatus: string; status: string;
-    invoices: { id: string; invoiceNo: string; termLabel: string; total: number; paidAmount: number; status: string; dueDate: string }[];
+    id: string; soNo: string; customerPoNo: string; total: number; productionStatus: string; status: string; currency: string;
+    lcNo: string | null; lcExpiryDate: string | null; lcLatestShipment: string | null;
+    invoices: { id: string; invoiceNo: string; termLabel: string; total: number; paidAmount: number; status: string; dueDate: string; currency: string }[];
   };
   serviceJobs: { id: string; jobNo: string; status: string; type: string }[];
   payment: { paid: number; remaining: number; fullyPaid: boolean };
@@ -35,6 +36,7 @@ export default function ShipmentDetail({ s, canManage, canApprove }: { s: Shipme
   const so = s.salesOrder;
   const exceptionOk = s.exceptionStatus === "Approved";
   const gateOpen = s.payment.fullyPaid || exceptionOk;
+  const lc = lcState(so);
   const productionReady = so.productionStatus === "Ready to Ship";
   const totalGross = packages.reduce((t, p) => t + (Number(p.grossKg) || 0), 0);
   const show = (m: Modal) => { modal.setError(null); setOpen(m); };
@@ -50,6 +52,7 @@ export default function ShipmentDetail({ s, canManage, canApprove }: { s: Shipme
         <div className="flex flex-wrap gap-2">
           <DocLinks kind="packing-list" id={s.id} label="Packing List" formats={["pdf", "docx"]} />
           <DocLinks kind="delivery-order" id={s.id} label="Surat Jalan" formats={["pdf"]} />
+          {s.scope === "Ekspor" && <DocLinks kind="commercial-invoice" id={s.id} label="Commercial Invoice" formats={["pdf", "docx"]} />}
           {canManage && ["Draft", "Ready"].includes(s.status) && <Link href={`/modules/contract-shipping/shipments/${s.id}/edit`} className={btnSecondary}><Pencil className="w-4 h-4" /> Edit</Link>}
           {canManage && ["Draft", "Ready"].includes(s.status) && <button className={btnDanger} disabled={pending} onClick={() => { const r = prompt("Alasan pembatalan shipment:"); if (r) exec(() => cancelShipment(s.id, r)); }}><Ban className="w-4 h-4" /> Batalkan</button>}
           {canManage && s.status === "Draft" && <button className={btnPrimary} disabled={pending || !gateOpen || !productionReady} onClick={() => exec(() => releaseShipment(s.id))}><PackageCheck className="w-4 h-4" /> Rilis untuk dikirim</button>}
@@ -66,8 +69,18 @@ export default function ShipmentDetail({ s, canManage, canApprove }: { s: Shipme
           <ul className="space-y-1.5 text-sm">
             <li className="flex items-start gap-2">
               {s.payment.fullyPaid ? <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" aria-hidden /> : <Lock className="w-4 h-4 text-red-600 mt-0.5 shrink-0" aria-hidden />}
-              <span>{s.payment.fullyPaid ? "Order lunas (termasuk L/C)." : <>Belum lunas: terbayar {rupiah(s.payment.paid)} dari {rupiah(so.total)}, <strong>sisa {rupiah(s.payment.remaining)}</strong>.</>}</span>
+              <span>{s.payment.fullyPaid ? "Order lunas (termasuk L/C)." : <>Belum lunas: terbayar {money(s.payment.paid, so.currency)} dari {money(so.total, so.currency)}, <strong>sisa {money(s.payment.remaining, so.currency)}</strong>.</>}</span>
             </li>
+            {lc && (
+              <li className="flex items-start gap-2">
+                {lc.level === "ok" ? <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" aria-hidden /> : lc.level === "warning" ? <ShieldQuestion className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" aria-hidden /> : <Lock className="w-4 h-4 text-red-600 mt-0.5 shrink-0" aria-hidden />}
+                <span>
+                  L/C {so.lcNo}: batas kirim {so.lcLatestShipment ?? "-"}, kedaluwarsa {so.lcExpiryDate ?? "-"}.
+                  {lc.level === "expired" ? <strong className="text-red-700"> Sudah lewat — kirim hanya setelah amendment L/C dari buyer.</strong>
+                    : lc.level === "warning" ? <strong className="text-amber-800"> Kurang dari 14 hari lagi — pastikan B/L terbit sebelum batas.</strong> : null}
+                </span>
+              </li>
+            )}
             {!s.payment.fullyPaid && (
               <li className="flex items-start gap-2">
                 {exceptionOk ? <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" aria-hidden /> : <ShieldQuestion className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" aria-hidden />}
@@ -135,7 +148,7 @@ export default function ShipmentDetail({ s, canManage, canApprove }: { s: Shipme
                 {so.invoices.map(inv => (
                   <li key={inv.id} className="py-2.5 flex items-center justify-between gap-3 text-sm">
                     <Link href={`/modules/sales/invoices/${inv.id}`} className="text-blue-700 hover:underline">{inv.invoiceNo} <span className="text-slate-500">· {inv.termLabel}</span></Link>
-                    <span className="flex items-center gap-2 tabular-nums">{rupiah(inv.paidAmount)} / {rupiah(inv.total)} <StatusBadge status={invoiceState(inv)} /></span>
+                    <span className="flex items-center gap-2 tabular-nums">{money(inv.paidAmount, inv.currency)} / {money(inv.total, inv.currency)} <StatusBadge status={invoiceState(inv)} /></span>
                   </li>
                 ))}
               </ul>

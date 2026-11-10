@@ -4,12 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Factory, Lock, Pencil, X } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
-import { PRODUCTION_LABEL, PRODUCTION_STATUSES, rupiah, today } from "@/app/modules/sales/lib";
+import { PRODUCTION_LABEL, PRODUCTION_STATUSES, today, money } from "@/app/modules/sales/lib";
 import { ErrorNote, StatusBadge, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "@/app/modules/sales/ui";
 import { updateProduction } from "../actions";
 
 type Order = {
-  id: string; soNo: string; customerPoNo: string; status: string; total: number; expectedDelivery: string | null;
+  id: string; soNo: string; customerPoNo: string; status: string; total: number; currency: string; expectedDelivery: string | null;
   productionStatus: string; productionStart: string | null; productionTarget: string | null; productionNotes: string | null;
   customer: { id: string; name: string; city: string | null };
   items: { description: string; qty: number; unit: string }[];
@@ -60,7 +60,7 @@ export default function ProductionBoard({ orders, canManage }: { orders: Order[]
                         {canManage && !o.salesShipments.some(s => s.status !== "Cancelled") && <Link href={`/modules/contract-shipping/shipments/new?so=${o.id}`} className="text-xs font-semibold text-blue-700 hover:underline">Buat shipment</Link>}
                       </div>
                     ) : (
-                      <p className="text-xs text-red-700 flex items-center gap-1"><Lock className="w-3.5 h-3.5" aria-hidden /> Belum lunas · sisa {rupiah(o.payment.remaining)}</p>
+                      <p className="text-xs text-red-700 flex items-center gap-1"><Lock className="w-3.5 h-3.5" aria-hidden /> Belum lunas · sisa {money(o.payment.remaining, o.currency)}</p>
                     )
                   )}
                 </article>

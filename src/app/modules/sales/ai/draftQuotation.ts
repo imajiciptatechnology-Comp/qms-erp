@@ -2,7 +2,7 @@
 // AI hanya memilih produk dari katalog + menulis teks; harga selalu diambil dari master produk.
 import { prisma } from "@/lib/prisma";
 import { aiComplete, parseAiJson } from "@/lib/ai";
-import { DEFAULT_TEXT, addDays, today } from "../lib";
+import { DEFAULT_TEXT, DEFAULT_TEXT_EN, addDays, isExportCustomer, today } from "../lib";
 import type { QuotationInput } from "../server";
 
 const MAX_DISCOUNT = 30;
@@ -59,6 +59,8 @@ export async function generateQuotationDraft(input: { customerId: string; reques
     input.opportunityId ? prisma.opportunity.findUnique({ where: { id: input.opportunityId } }) : null,
   ]);
 
+  const english = isExportCustomer(customer);
+  const T = english ? DEFAULT_TEXT_EN : DEFAULT_TEXT;
   // Prompt sengaja ringkas: prompt besar membuat model lambat (timeout di Vercel) dan jawaban terpotong.
   const catalog = products.map(p => `${p.sku} | ${p.name} (${p.model ? `${p.brand} ${p.model}` : p.brand}) | ${p.unit} | Rp${p.price} | ${p.availability === "Indent" ? `indent ${p.leadTimeWeeks ?? "?"} mgg` : "ready"}`);
   const exampleDocs = examples.map((q, i) => ({
@@ -70,15 +72,17 @@ export async function generateQuotationDraft(input: { customerId: string; reques
   }));
 
   const system = `Kamu adalah asisten sales PT Labtech Penta International (produsen peralatan praktik/trainer pendidikan vokasi & teknik, pabrik di Batam; B2B ke SMK, politeknik, universitas, pemerintah, dan lembaga internasional).
-Tugasmu: menyusun DRAFT surat penawaran harga dalam Bahasa Indonesia formal, meniru gaya bahasa, struktur, dan syarat dari contoh penawaran sebelumnya.
+Tugasmu: menyusun DRAFT surat penawaran harga dalam ${english ? `BAHASA INGGRIS formal (customer luar negeri, ${customer.country}; contoh berbahasa Indonesia hanya acuan struktur & syarat, terjemahkan)` : "Bahasa Indonesia formal"}, meniru gaya bahasa, struktur, dan syarat dari contoh penawaran sebelumnya.
 
 Aturan:
 - Item HANYA boleh dari katalog (pakai "sku" persis). Jangan mengarang produk atau harga. Harga diisi sistem dari katalog.
 - Jika kebutuhan mencakup alat yang perlu dipasang (bukan jasa atau alat portable kecil), tambahkan jasa "Instalasi, Commissioning & Training" (sku LPI-SRV-003) bila ada di katalog dan belum diminta, sejumlah unit alat tersebut — kecuali user bilang tidak perlu.
 - Kebutuhan yang tidak ada di katalog tulis di "unmatched", jangan dipaksakan.
 - Diskon hanya jika diminta user atau lazim di contoh untuk customer yang sama; maksimal ${MAX_DISCOUNT}%. Diskon di atas 10% nanti butuh persetujuan Sales Manager. Taruh diskon di SATU tempat saja: per item ("items[].discountPercent") jika berlaku untuk item tertentu, atau "discountPercent" (diskon total) jika untuk seluruh penawaran — jangan keduanya.
-- introText: pembuka surat seperti contoh (diawali "Dengan hormat,"), sebutkan alat yang ditawarkan. closingText: penutup seperti contoh. Masing-masing maksimal ±80 kata. Pisahkan paragraf dengan baris kosong.
-- Syarat pembayaran sesuaikan termin customer (${customer.paymentTerms}); untuk instansi pemerintah ikuti pola contoh pemerintah. Pengiriman: sebut indent bila ada item indent.
+- introText: pembuka surat seperti contoh (diawali ${english ? '"Dear Sir/Madam,"' : '"Dengan hormat,"'}), sebutkan alat yang ditawarkan. closingText: penutup seperti contoh. Masing-masing maksimal ±80 kata. Pisahkan paragraf dengan baris kosong.
+- Syarat pembayaran sesuaikan termin customer (${customer.paymentTerms}); untuk instansi pemerintah ikuti pola contoh pemerintah. Pengiriman: sebut indent bila ada item indent.${english ? `
+- Customer ekspor: pengiriman dengan Incoterm (mis. FOB Batam / CIF pelabuhan tujuan), harga tanpa pajak & bea masuk negara tujuan, pembayaran DP + pelunasan sebelum kirim atau L/C at sight. Contoh syarat: "${DEFAULT_TEXT_EN.payment}"` : ""}
+- explanation selalu dalam Bahasa Indonesia.
 - explanation: 1-3 kalimat untuk sales (bukan untuk customer): contoh mana yang dijadikan acuan, asumsi yang kamu ambil, dan hal yang perlu dicek.
 
 Jawab HANYA JSON dengan bentuk:
@@ -86,7 +90,7 @@ Jawab HANYA JSON dengan bentuk:
 
   const user = JSON.stringify({
     kebutuhan: request,
-    customer: { name: customer.name, type: customer.type, city: customer.city, contact: customer.contactName, paymentTerms: customer.paymentTerms },
+    customer: { name: customer.name, type: customer.type, city: customer.city, country: customer.country, contact: customer.contactName, paymentTerms: customer.paymentTerms },
     opportunity: opportunity ? { title: opportunity.title, notes: opportunity.notes } : undefined,
     contohPenawaranSebelumnya: exampleDocs,
     katalog: { format: "sku | nama (merek model) | satuan | harga | ketersediaan", items: catalog },
@@ -131,10 +135,10 @@ Jawab HANYA JSON dengan bentuk:
   return {
     draft: {
       customerId: customer.id, opportunityId: input.opportunityId || null, date: today(), validUntil: addDays(today(), clamp(ans.validityDays, 7, 90, 30)),
-      subject: str(ans.subject, "Penawaran Harga Peralatan Laboratorium"), attention: customer.contactName ?? "",
-      introText: str(ans.introText, DEFAULT_TEXT.intro("")), closingText: str(ans.closingText, DEFAULT_TEXT.closing),
+      subject: str(ans.subject, english ? "Quotation for TVET Training Equipment" : "Penawaran Harga Peralatan Praktik"), attention: customer.contactName ?? "",
+      introText: str(ans.introText, T.intro("")), closingText: str(ans.closingText, T.closing),
       discountPercent,
-      paymentTerms: str(ans.paymentTerms, DEFAULT_TEXT.payment), deliveryTerms: str(ans.deliveryTerms, DEFAULT_TEXT.delivery), warrantyTerms: str(ans.warrantyTerms, DEFAULT_TEXT.warranty),
+      paymentTerms: str(ans.paymentTerms, T.payment), deliveryTerms: str(ans.deliveryTerms, T.delivery), warrantyTerms: str(ans.warrantyTerms, T.warranty),
       notes: `Draft AI dari permintaan: "${request.slice(0, 300)}"`, items,
     },
     explanation: str(ans.explanation, ""),

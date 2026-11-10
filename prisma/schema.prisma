@@ -535,6 +535,8 @@ model KvStore {
 // ---------------------------------------------------------
 // SALES & MARKETING (B2B: penawaran → PO customer → invoice → kontrak)
 // Nominal dalam Rupiah. Status "jatuh tempo"/"hampir habis" dihitung dari tanggal, tidak disimpan.
+// Ekspor: quotation/SO/invoice punya currency (IDR | USD | EUR | SGD) + exchangeRate (Rp per 1 unit valuta,
+// dipakai untuk menjumlah dashboard dalam Rupiah). Kontrak & opportunity tetap Rupiah.
 // ---------------------------------------------------------
 
 model Customer {
@@ -564,6 +566,10 @@ model Customer {
   serviceTickets ServiceTicket[]
   signatoryName  String?
   signatoryTitle String?
+  /// Negara pelanggan; selain Indonesia = pelanggan ekspor (dokumen berbahasa Inggris, PPN 0%).
+  country        String          @default("Indonesia")
+  /// Mata uang default untuk penawaran baru.
+  currency       String          @default("IDR")
 }
 
 model Product {
@@ -584,6 +590,8 @@ model Product {
   specs                     String?
   isActive                  Boolean @default(true)
   createdAt                 String
+  /// Kode HS (Harmonized System) untuk commercial invoice / PEB.
+  hsCode                    String?
 }
 
 model Opportunity {
@@ -641,6 +649,8 @@ model Quotation {
   opportunity     Opportunity?    @relation(fields: [opportunityId], references: [id])
   items           QuotationItem[]
   salesOrders     SalesOrder[]
+  currency        String          @default("IDR")
+  exchangeRate    Float           @default(1)
 
   @@unique([quotationNo, revision])
 }
@@ -690,6 +700,17 @@ model SalesOrder {
   productionStart     String?
   productionTarget    String?
   productionNotes     String?
+  currency            String           @default("IDR")
+  exchangeRate        Float            @default(1)
+  taxPercent          Float            @default(11)
+  /// Letter of Credit (bila pembayaran via L/C).
+  lcNo                String?
+  lcIssuingBank       String?
+  lcIssueDate         String?
+  lcExpiryDate        String?
+  lcLatestShipment    String?
+  lcAmount            Float?
+  lcNotes             String?
   customer            Customer         @relation(fields: [customerId], references: [id])
   quotation           Quotation?       @relation(fields: [quotationId], references: [id])
   items               SalesOrderItem[]
@@ -739,6 +760,9 @@ model Invoice {
   periodLabel   String?
   items         InvoiceItem[]
   reminders     PaymentReminder[]
+  currency      String            @default("IDR")
+  exchangeRate  Float             @default(1)
+  taxPercent    Float             @default(11)
 }
 
 /// Rincian invoice manual / dari kontrak (invoice per termin SO tidak memakai tabel ini).

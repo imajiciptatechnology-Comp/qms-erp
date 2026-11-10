@@ -13,7 +13,7 @@ export default async function EditShipmentPage({ params }: { params: Promise<{ i
   const so = s.salesOrder;
   const order = {
     id: so.id, soNo: so.soNo, customerPoNo: so.customerPoNo, customer: s.customer.name, deliveryAddress: so.deliveryAddress ?? "",
-    productionStatus: so.productionStatus, payment: orderPaidStatus(so), items: so.items.map(i => ({ description: i.description, qty: i.qty, unit: i.unit })),
+    productionStatus: so.productionStatus, payment: orderPaidStatus(so), currency: so.currency, items: so.items.map(i => ({ description: i.description, qty: i.qty, unit: i.unit })),
   };
   return (
     <div className="space-y-4">

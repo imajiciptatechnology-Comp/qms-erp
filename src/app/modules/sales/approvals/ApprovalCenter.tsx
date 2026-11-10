@@ -7,7 +7,7 @@ import ModalShell from "@/components/ui/ModalShell";
 import { decideContract, decideQuotation } from "../actions";
 import { decideShipmentException } from "@/app/modules/contract-shipping/actions";
 import { decideServiceJob } from "@/app/modules/customer-service/actions";
-import { rupiah, today } from "../lib";
+import { money, today } from "../lib";
 import type { ApprovalItem } from "../server";
 import { ErrorNote, btnDanger, btnSecondary, inputCls, labelCls, useAction } from "../ui";
 
@@ -88,7 +88,7 @@ export default function ApprovalCenter({ items, canApprove }: { items: ApprovalI
                     {item.dueDate && <span className={late ? "text-red-600 font-semibold" : ""}> · batas keputusan {item.dueDate}{late ? " (lewat)" : ""}</span>}
                   </p>
                 </div>
-                {item.amount ? <p className="text-sm font-semibold text-slate-800 tabular-nums lg:text-right shrink-0">{rupiah(item.amount)}</p> : null}
+                {item.amount ? <p className="text-sm font-semibold text-slate-800 tabular-nums lg:text-right shrink-0">{money(item.amount, item.currency)}</p> : null}
                 <div className="flex flex-wrap gap-2 shrink-0">
                   <Link href={item.href} className={btnSecondary}><ExternalLink className="w-4 h-4" /> Buka</Link>
                   {canApprove && item.decidable && <>

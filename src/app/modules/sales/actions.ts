@@ -10,7 +10,7 @@ import { AiError } from "@/lib/ai";
 import { generateQuotationDraft } from "./ai/draftQuotation";
 import { generateContractDraft } from "./ai/draftContract";
 import { REMINDER_LEVELS, generateReminderLetter } from "./ai/reminderLetter";
-import { CONTRACT_REVIEW_ITEMS, PAYMENT_SCHEDULES, PERM, STAGE_PROBABILITY, TAX_PERCENT, CONTRACT_APPROVAL_BUSINESS_DAYS, addBusinessDays, addDays, computeTotals, contractBillingPeriods, lineTotal, needsApproval, salesAccess, today, type LineInput } from "./lib";
+import { CONTRACT_REVIEW_ITEMS, CURRENCIES, PAYMENT_SCHEDULES, PERM, STAGE_PROBABILITY, CONTRACT_APPROVAL_BUSINESS_DAYS, addBusinessDays, addDays, computeTotals, contractBillingPeriods, defaultTaxFor, lineTotal, money, needsApproval, roundMoney, salesAccess, today, type LineInput } from "./lib";
 import { buildClauses, type Clause } from "./documents/contractTemplates";
 import { addHistory, fillQuotationDefaults, firstHistory, insertDraftQuotation, nextDocNo, quotationData, type QuotationInput } from "./server";
 
@@ -109,14 +109,14 @@ export async function getQuotation(id: string) {
     include: { customer: true, opportunity: true, items: { orderBy: { sortOrder: "asc" } }, salesOrders: { select: { id: true, soNo: true } } },
   });
   if (!q) return null;
-  const revisions = await prisma.quotation.findMany({ where: { quotationNo: q.quotationNo }, select: { id: true, revision: true, status: true, date: true, total: true }, orderBy: { revision: "asc" } });
+  const revisions = await prisma.quotation.findMany({ where: { quotationNo: q.quotationNo }, select: { id: true, revision: true, status: true, date: true, total: true, currency: true }, orderBy: { revision: "asc" } });
   return { ...q, revisions };
 }
 
 export async function getQuotationFormData() {
   await guard();
   const [customers, products, opportunities] = await Promise.all([
-    prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, contactName: true, paymentTerms: true, type: true } }),
+    prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, contactName: true, paymentTerms: true, type: true, country: true, currency: true } }),
     prisma.product.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }] }),
     prisma.opportunity.findMany({ where: { stage: { notIn: ["Won", "Lost"] } }, select: { id: true, opportunityNo: true, title: true, customerId: true } }),
   ]);
@@ -157,7 +157,7 @@ export async function getInvoice(id: string) {
 export async function getInvoiceFormData() {
   await guard("finance");
   const [customers, products, contracts] = await Promise.all([
-    prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, paymentTerms: true } }),
+    prisma.customer.findMany({ where: { status: "Active" }, orderBy: { name: "asc" }, select: { id: true, name: true, paymentTerms: true, country: true, currency: true } }),
     prisma.product.findMany({ where: { isActive: true }, orderBy: [{ category: "asc" }, { name: "asc" }], select: { id: true, sku: true, name: true, brand: true, model: true, unit: true, price: true, category: true } }),
     prisma.contract.findMany({
       where: { type: { not: "Garansi" }, value: { gt: 0 }, status: { in: ["Approved", "Sent", "Active"] } },
@@ -234,12 +234,14 @@ export type CustomerInput = {
   name: string; type: string; npwp?: string; address?: string; city?: string;
   contactName?: string; contactTitle?: string; contactEmail?: string; contactPhone?: string; paymentTerms: string; notes?: string;
   signatoryName?: string; signatoryTitle?: string;
+  country?: string; currency?: string;
 };
 
 export async function saveCustomer(id: string | null, data: CustomerInput) {
   return run(async () => {
     const user = await guard("manage");
     if (!data.name?.trim()) throw new Error("Nama customer wajib diisi.");
+    data = { ...data, country: data.country?.trim() || "Indonesia", currency: (CURRENCIES as readonly string[]).includes(data.currency ?? "") ? data.currency : "IDR" };
     if (id) {
       const old = await prisma.customer.findUniqueOrThrow({ where: { id } });
       await prisma.customer.update({ where: { id }, data: { ...data, historyJson: addHistory(old.historyJson, user.name, "Data customer diperbarui") } });
@@ -255,6 +257,7 @@ export type ProductInput = {
   sku: string; name: string; category: string; brand: string; model?: string; unit: string; price: number;
   availability: string; leadTimeWeeks?: number | null; warrantyMonths: number; requiresCalibration: boolean;
   calibrationIntervalMonths?: number | null; specs?: string; isActive: boolean;
+  hsCode?: string | null;
 };
 
 export async function saveProduct(id: string | null, data: ProductInput) {
@@ -262,6 +265,7 @@ export async function saveProduct(id: string | null, data: ProductInput) {
     await guard("manage");
     if (!data.sku?.trim() || !data.name?.trim()) throw new Error("Kode dan nama produk wajib diisi.");
     if (!(data.price >= 0)) throw new Error("Harga tidak valid.");
+    data = { ...data, hsCode: data.hsCode?.trim() || null };
     if (id) {
       await prisma.product.update({ where: { id }, data });
       return id;
@@ -429,7 +433,8 @@ export async function createSalesOrderFromQuotation(formData: FormData) {
       soNo: await nextDocNo("SO", today()), customerId: q.customerId, quotationId: q.id, customerPoNo, customerPoDate, customerPoFile,
       orderDate: today(), status: "Contract Review", expectedDelivery, deliveryAddress: q.customer.address,
       contractReviewJson: JSON.stringify(CONTRACT_REVIEW_ITEMS.map(item => ({ item, ok: false }))), paymentScheduleJson: JSON.stringify(schedule),
-      subtotal: q.subtotal - q.discountAmount, taxAmount: q.taxAmount, total: q.total, salesName: q.salesName, createdAt: today(),
+      subtotal: roundMoney(q.subtotal - q.discountAmount, q.currency), taxAmount: q.taxAmount, total: q.total, salesName: q.salesName, createdAt: today(),
+      currency: q.currency, exchangeRate: q.exchangeRate, taxPercent: q.taxPercent,
       historyJson: firstHistory(user.name, `Dibuat dari PO ${customerPoNo} (penawaran ${q.quotationNo} Rev.${q.revision})`),
       items: { create: q.items.map(i => ({ productId: i.productId, description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, lineTotal: i.lineTotal, sortOrder: i.sortOrder })) },
     } });
@@ -487,6 +492,32 @@ export async function cancelSalesOrder(id: string, reason: string) {
   });
 }
 
+export type LetterOfCreditInput = {
+  lcNo: string; lcIssuingBank?: string; lcIssueDate?: string; lcExpiryDate?: string; lcLatestShipment?: string; lcAmount?: number | null; lcNotes?: string;
+};
+
+/** Catat / ubah data L/C pada Sales Order (Sales atau Finance). Kosongkan nomor L/C untuk menghapus. */
+export async function saveLetterOfCredit(id: string, data: LetterOfCreditInput) {
+  return run(async () => {
+    const user = await getCurrentUser();
+    if (!user) throw new Error("Silakan login terlebih dahulu.");
+    const access = salesAccess(user, await getRolesConfig());
+    if (!access.canManage && !access.canFinance) throw new Error("Anda tidak punya akses untuk aksi ini.");
+    const so = await prisma.salesOrder.findUniqueOrThrow({ where: { id } });
+    const lcNo = data.lcNo?.trim() || null;
+    if (lcNo) {
+      if (data.lcExpiryDate && data.lcLatestShipment && data.lcLatestShipment > data.lcExpiryDate) throw new Error("Batas pengiriman (latest shipment) tidak boleh melewati tanggal kedaluwarsa L/C.");
+      if (data.lcAmount != null && !(data.lcAmount > 0)) throw new Error("Nilai L/C tidak valid.");
+    }
+    const fields = lcNo
+      ? { lcNo, lcIssuingBank: data.lcIssuingBank?.trim() || null, lcIssueDate: data.lcIssueDate || null, lcExpiryDate: data.lcExpiryDate || null,
+          lcLatestShipment: data.lcLatestShipment || null, lcAmount: data.lcAmount ?? null, lcNotes: data.lcNotes?.trim() || null }
+      : { lcNo: null, lcIssuingBank: null, lcIssueDate: null, lcExpiryDate: null, lcLatestShipment: null, lcAmount: null, lcNotes: null };
+    const action = !lcNo ? "Data L/C dihapus" : so.lcNo ? `Data L/C ${lcNo} diperbarui` : `L/C ${lcNo} dicatat`;
+    await prisma.salesOrder.update({ where: { id }, data: { ...fields, historyJson: addHistory(so.historyJson, user.name, action) } });
+  });
+}
+
 // ---------------------------------------------------------
 // Invoice & pembayaran
 // ---------------------------------------------------------
@@ -500,18 +531,22 @@ export async function createInvoiceFromSchedule(salesOrderId: string, termIndex:
     const term = schedule[termIndex];
     if (!term) throw new Error("Termin tidak ditemukan.");
     if (so.invoices.some(i => i.termLabel === term.label && i.status !== "Cancelled")) throw new Error(`Invoice ${term.label} sudah dibuat.`);
-    const subtotal = Math.round(so.subtotal * term.percent / 100);
-    const taxAmount = Math.round(subtotal * TAX_PERCENT / 100);
+    // Termin terakhir menutup sisa agar pembulatan tidak membuat total invoice berbeda dari nilai SO.
+    const others = so.invoices.filter(i => i.status !== "Cancelled");
+    const isLast = others.length === schedule.length - 1;
+    const subtotal = isLast ? roundMoney(so.subtotal - others.reduce((t, i) => t + i.subtotal, 0), so.currency) : roundMoney(so.subtotal * term.percent / 100, so.currency);
+    const taxAmount = isLast ? roundMoney(so.taxAmount - others.reduce((t, i) => t + i.taxAmount, 0), so.currency) : roundMoney(subtotal * so.taxPercent / 100, so.currency);
     const inv = await prisma.invoice.create({ data: {
       invoiceNo: await nextDocNo("INV", today()), customerId: so.customerId, salesOrderId: so.id, termLabel: term.label, termPercent: term.percent,
-      invoiceDate: today(), dueDate: addDays(today(), termDays(so.customer.paymentTerms)), subtotal, taxAmount, total: subtotal + taxAmount,
+      currency: so.currency, exchangeRate: so.exchangeRate, taxPercent: so.taxPercent,
+      invoiceDate: today(), dueDate: addDays(today(), termDays(so.customer.paymentTerms)), subtotal, taxAmount, total: roundMoney(subtotal + taxAmount, so.currency),
       status: "Unpaid", createdAt: today(), historyJson: firstHistory(user.name, `Invoice ${term.label} untuk ${so.soNo}`),
     } });
     return inv.id;
   });
 }
 
-export type ManualInvoiceInput = { customerId: string; invoiceDate: string; termLabel: string; notes?: string; items: LineInput[] };
+export type ManualInvoiceInput = { customerId: string; invoiceDate: string; termLabel: string; notes?: string; items: LineInput[]; currency?: string; exchangeRate?: number; taxPercent?: number };
 
 /** Invoice tanpa Sales Order: suku cadang, jasa panggilan, dll. */
 export async function createManualInvoice(data: ManualInvoiceInput) {
@@ -523,12 +558,17 @@ export async function createManualInvoice(data: ManualInvoiceInput) {
     if (!items.length) throw new Error("Tambahkan minimal satu item.");
     if (items.some(i => !(i.qty > 0) || !(i.unitPrice >= 0))) throw new Error("Jumlah dan harga item harus valid.");
     if (!data.invoiceDate) throw new Error("Tanggal invoice wajib diisi.");
-    const { subtotal, taxAmount, total } = computeTotals(items);
+    const currency = (CURRENCIES as readonly string[]).includes(data.currency ?? "") ? data.currency! : "IDR";
+    const exchangeRate = currency === "IDR" ? 1 : Number(data.exchangeRate);
+    if (!(exchangeRate > 0)) throw new Error(`Isi kurs (Rp per 1 ${currency}).`);
+    const taxPercent = data.taxPercent ?? defaultTaxFor(customer);
+    const { subtotal, taxAmount, total } = computeTotals(items, 0, taxPercent, currency);
     const inv = await prisma.invoice.create({ data: {
       invoiceNo: await nextDocNo("INV", data.invoiceDate), customerId: customer.id, termLabel: data.termLabel?.trim() || "Tagihan", termPercent: 100,
+      currency, exchangeRate, taxPercent,
       invoiceDate: data.invoiceDate, dueDate: addDays(data.invoiceDate, termDays(customer.paymentTerms)), subtotal, taxAmount, total,
       status: "Unpaid", notes: data.notes || null, createdAt: today(), historyJson: firstHistory(user.name, "Invoice manual diterbitkan"),
-      items: { create: items.map((i, idx) => ({ productId: i.productId || null, description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, lineTotal: lineTotal(i), sortOrder: idx + 1 })) },
+      items: { create: items.map((i, idx) => ({ productId: i.productId || null, description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, lineTotal: lineTotal(i, currency), sortOrder: idx + 1 })) },
     } });
     return inv.id;
   });
@@ -545,9 +585,11 @@ export async function createInvoiceFromContract(contractId: string, periodIndex:
     if (!period) throw new Error("Periode tagih tidak ditemukan.");
     if (c.invoices.some(i => i.periodLabel === period.label && i.status !== "Cancelled")) throw new Error(`Periode "${period.label}" sudah ditagih.`);
     const subtotal = Math.round(c.value * period.percent / 100);
-    const taxAmount = Math.round(subtotal * TAX_PERCENT / 100);
+    const taxPercent = defaultTaxFor(c.customer);
+    const taxAmount = Math.round(subtotal * taxPercent / 100);
     const invoiceDate = today();
     const inv = await prisma.invoice.create({ data: {
+      taxPercent,
       invoiceNo: await nextDocNo("INV", invoiceDate), customerId: c.customerId, contractId: c.id, periodLabel: period.label,
       termLabel: `Kontrak ${c.type}${period.percent < 100 ? ` - Triwulan ${periodIndex + 1}` : ""}`, termPercent: period.percent,
       invoiceDate, dueDate: addDays(invoiceDate, termDays(c.paymentTerms || c.customer.paymentTerms)), subtotal, taxAmount, total: subtotal + taxAmount,
@@ -570,15 +612,16 @@ export async function recordPayment(formData: FormData) {
     const file = formData.get("proof") as File | null;
     const inv = await prisma.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
     if (["Paid", "Cancelled"].includes(inv.status)) throw new Error("Invoice ini sudah lunas/dibatalkan.");
-    const remaining = inv.total - inv.paidAmount;
-    if (!(amount > 0) || amount > remaining + 0.5) throw new Error(`Nominal harus antara 1 dan sisa tagihan.`);
+    const remaining = roundMoney(inv.total - inv.paidAmount, inv.currency);
+    const tol = inv.currency === "IDR" ? 0.5 : 0.005;
+    if (!(amount > 0) || amount > remaining + tol) throw new Error(`Nominal harus lebih dari 0 dan tidak melebihi sisa tagihan (${money(remaining, inv.currency)}).`);
     if (!paymentDate) throw new Error("Tanggal pembayaran wajib diisi.");
     const proofUrl = file && file.size > 0 ? await uploadToStorage("sales/payments", file) : null;
-    const paidAmount = inv.paidAmount + amount;
-    const status = paidAmount >= inv.total - 0.5 ? "Paid" : "Partial";
+    const paidAmount = roundMoney(inv.paidAmount + amount, inv.currency);
+    const status = paidAmount >= inv.total - tol ? "Paid" : "Partial";
     await prisma.$transaction([
       prisma.payment.create({ data: { invoiceId, amount, paymentDate, method, reference, proofUrl, receivedBy: user.name, createdAt: today(), receiptNo: await nextDocNo("KWT", paymentDate) } }),
-      prisma.invoice.update({ where: { id: invoiceId }, data: { paidAmount, status, historyJson: addHistory(inv.historyJson, user.name, `Pembayaran Rp ${Math.round(amount).toLocaleString("id-ID")} (${status === "Paid" ? "lunas" : "sebagian"})`) } }),
+      prisma.invoice.update({ where: { id: invoiceId }, data: { paidAmount, status, historyJson: addHistory(inv.historyJson, user.name, `Pembayaran ${money(amount, inv.currency)} (${status === "Paid" ? "lunas" : "sebagian"})`) } }),
     ]);
   });
 }

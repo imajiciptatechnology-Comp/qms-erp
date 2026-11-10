@@ -4,12 +4,12 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Lock, Plus, Trash2 } from "lucide-react";
-import { INCOTERMS, PRODUCTION_LABEL, SHIPMENT_MODES, SHIPMENT_SCOPES, rupiah, type CratePackage } from "@/app/modules/sales/lib";
+import { INCOTERMS, PRODUCTION_LABEL, SHIPMENT_MODES, SHIPMENT_SCOPES, type CratePackage, money } from "@/app/modules/sales/lib";
 import { Card, ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "@/app/modules/sales/ui";
 import { createShipment, updateShipment, type ShipmentInput } from "../actions";
 
 type OrderOption = {
-  id: string; soNo: string; customerPoNo: string; customer: string; deliveryAddress: string; productionStatus: string;
+  id: string; soNo: string; customerPoNo: string; customer: string; deliveryAddress: string; productionStatus: string; currency: string;
   payment: { paid: number; remaining: number; fullyPaid: boolean }; items: { description: string; qty: number; unit: string }[];
 };
 
@@ -54,7 +54,7 @@ export default function ShipmentForm({ orders, initial, shipmentId }: { orders: 
                 <span className="text-slate-600">Produksi: <strong>{PRODUCTION_LABEL[order.productionStatus]}</strong></span>
                 {order.payment.fullyPaid
                   ? <span className="text-emerald-700 font-medium">Lunas — boleh dikirim</span>
-                  : <span className="text-red-700 font-medium flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden /> Belum lunas (sisa {rupiah(order.payment.remaining)}) — shipment bisa disiapkan, tapi rilis terkunci</span>}
+                  : <span className="text-red-700 font-medium flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden /> Belum lunas (sisa {money(order.payment.remaining, order.currency)}) — shipment bisa disiapkan, tapi rilis terkunci</span>}
               </div>
             )}
           </div>

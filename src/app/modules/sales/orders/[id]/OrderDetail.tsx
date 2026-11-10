@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { ArrowLeft, Ban, CheckSquare, FileText, Lock, Receipt, Square, Truck } from "lucide-react";
 import { advanceSalesOrder, cancelSalesOrder, createInvoiceFromSchedule, toggleContractReview } from "../../actions";
-import { JOB_STATUS_LABEL, PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, contractState, invoiceState, orderPaidStatus, rupiah, type SalesAccess } from "../../lib";
+import { JOB_STATUS_LABEL, PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, contractState, invoiceState, orderPaidStatus, rupiah, type SalesAccess, money } from "../../lib";
 import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, useAction } from "../../ui";
+import LetterOfCreditCard from "./LetterOfCreditCard";
 
 type SO = {
   id: string; soNo: string; customerPoNo: string; customerPoDate: string; customerPoFile: string | null; orderDate: string; status: string;
   contractReviewJson: string; deliveryAddress: string | null; expectedDelivery: string | null; installationDate: string | null; bastNo: string | null; bastDate: string | null;
   subtotal: number; taxAmount: number; total: number; paymentScheduleJson: string; salesName: string; notes: string | null; historyJson: string;
-  customer: { id: string; name: string }; quotation: { id: string; quotationNo: string; revision: number } | null;
+  currency: string; exchangeRate: number; taxPercent: number;
+  lcNo: string | null; lcIssuingBank: string | null; lcIssueDate: string | null; lcExpiryDate: string | null; lcLatestShipment: string | null; lcAmount: number | null; lcNotes: string | null;
+  customer: { id: string; name: string; country: string }; quotation: { id: string; quotationNo: string; revision: number } | null;
   items: { id: string; description: string; qty: number; unit: string; unitPrice: number; lineTotal: number; serialNumbers: string | null }[];
   invoices: { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string }[];
   contracts: { id: string; contractNo: string; type: string; title: string; endDate: string; status: string }[];
@@ -50,6 +53,7 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
         </div>
         <div className="flex flex-wrap gap-2">
           <DocLinks kind="order-confirmation" id={so.id} label="Konfirmasi" formats={["pdf", "docx"]} />
+          {so.status !== "Cancelled" && <DocLinks kind="proforma-invoice" id={so.id} label="Proforma" formats={["pdf", "docx"]} />}
           {["In Delivery", "Installed", "Completed"].includes(so.status) && <DocLinks kind="bast" id={so.id} label="BAST" formats={["pdf", "docx"]} />}
           {access.canApprove && !["Completed", "Cancelled"].includes(so.status) && <button className={btnDanger} disabled={pending} onClick={cancel}><Ban className="w-4 h-4" /> Batalkan</button>}
           {m && NEXT_LABEL[so.status] && <button className={btnPrimary} disabled={pending} onClick={advance}><Truck className="w-4 h-4" /> {NEXT_LABEL[so.status]}</button>}
@@ -98,20 +102,20 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
                     <tr key={it.id}>
                       <td className="py-2.5 pr-4"><p className="font-medium text-slate-800">{it.description}</p>{it.serialNumbers && <p className="text-xs text-slate-500">S/N: {it.serialNumbers}</p>}</td>
                       <td className="py-2.5 text-right whitespace-nowrap">{it.qty} {it.unit}</td>
-                      <td className="py-2.5 text-right tabular-nums whitespace-nowrap">{rupiah(it.lineTotal)}</td>
+                      <td className="py-2.5 text-right tabular-nums whitespace-nowrap">{money(it.lineTotal, so.currency)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             <dl className="ml-auto w-full sm:w-72 mt-4 space-y-1 text-sm">
-              <div className="flex justify-between"><dt className="text-slate-500">DPP</dt><dd className="tabular-nums">{rupiah(so.subtotal)}</dd></div>
-              <div className="flex justify-between"><dt className="text-slate-500">PPN</dt><dd className="tabular-nums">{rupiah(so.taxAmount)}</dd></div>
-              <div className="flex justify-between font-bold border-t border-slate-200 pt-1.5"><dt>Total</dt><dd className="tabular-nums">{rupiah(so.total)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">DPP</dt><dd className="tabular-nums">{money(so.subtotal, so.currency)}</dd></div>
+              <div className="flex justify-between"><dt className="text-slate-500">PPN {so.taxPercent}%</dt><dd className="tabular-nums">{money(so.taxAmount, so.currency)}</dd></div>
+              <div className="flex justify-between font-bold border-t border-slate-200 pt-1.5"><dt>Total</dt><dd className="tabular-nums">{money(so.total, so.currency)}</dd></div>
             </dl>
           </Card>
 
-          <Card title={`Termin & invoice · terbayar ${rupiah(paid)} dari ${rupiah(so.total)}`}>
+          <Card title={`Termin & invoice · terbayar ${money(paid, so.currency)} dari ${money(so.total, so.currency)}`}>
             <ul className="divide-y divide-slate-100">
               {schedule.map((t, i) => {
                 const inv = so.invoices.find(x => x.termLabel === t.label && x.status !== "Cancelled");
@@ -120,7 +124,7 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
                   <li key={t.label} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div>
                       <p className="font-semibold text-sm text-slate-800">{t.label} <span className="font-normal text-slate-500">· {t.trigger}</span></p>
-                      <p className="text-xs text-slate-500 tabular-nums">{rupiah(so.total * t.percent / 100)}</p>
+                      <p className="text-xs text-slate-500 tabular-nums">{money(so.total * t.percent / 100, so.currency)}</p>
                     </div>
                     {inv ? (
                       <Link href={`/modules/sales/invoices/${inv.id}`} className="flex items-center gap-2 text-sm text-blue-700 hover:underline">
@@ -147,8 +151,8 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
                   {pay.fullyPaid
                     ? <span className="text-emerald-700 font-medium">Lunas — boleh dikirim</span>
                     : so.salesShipments.some(s => s.exceptionStatus === "Approved")
-                      ? <span className="text-amber-800 font-medium">Izin khusus kirim sebelum lunas · sisa {rupiah(pay.remaining)}</span>
-                      : <span className="text-red-700 font-medium inline-flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden /> Sisa {rupiah(pay.remaining)} harus lunas sebelum kirim</span>}
+                      ? <span className="text-amber-800 font-medium">Izin khusus kirim sebelum lunas · sisa {money(pay.remaining, so.currency)}</span>
+                      : <span className="text-red-700 font-medium inline-flex items-center gap-1"><Lock className="w-4 h-4" aria-hidden /> Sisa {money(pay.remaining, so.currency)} harus lunas sebelum kirim</span>}
                 </InfoRow>
                 <InfoRow label="Shipment">
                   {so.salesShipments.length ? (
@@ -167,8 +171,10 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
               </dl>
             </Card>
           )}
+          <LetterOfCreditCard so={so} canEdit={(access.canManage || access.canFinance) && so.status !== "Cancelled"} />
           <Card title="Info order">
             <dl className="space-y-3">
+              {so.currency !== "IDR" && <InfoRow label="Mata uang">{`${so.currency} · kurs ${rupiah(so.exchangeRate)} (≈ ${rupiah(so.total * so.exchangeRate)})`}</InfoRow>}
               <InfoRow label="Tanggal PO">{so.customerPoDate}</InfoRow>
               <InfoRow label="File PO">{so.customerPoFile ? <a href={so.customerPoFile} target="_blank" rel="noreferrer" className="text-blue-700 hover:underline">Lihat file PO</a> : null}</InfoRow>
               <InfoRow label="Penawaran">{so.quotation ? <Link href={`/modules/sales/quotations/${so.quotation.id}`} className="text-blue-700 hover:underline">{so.quotation.quotationNo} Rev.{so.quotation.revision}</Link> : null}</InfoRow>

@@ -9,13 +9,13 @@ import { CUSTOMER_TYPES } from "../lib";
 import { btnPrimary, inputCls } from "../ui";
 import CustomerModal, { type CustomerFormValue } from "./CustomerModal";
 
-type Row = { id: string; customerNo: string; name: string; type: string; city: string | null; contactName: string | null; contactPhone: string | null; _count: { quotations: number; salesOrders: number; contracts: number } };
+type Row = { id: string; customerNo: string; name: string; type: string; city: string | null; country: string; currency: string; contactName: string | null; contactPhone: string | null; _count: { quotations: number; salesOrders: number; contracts: number } };
 
 export default function CustomerList({ customers, canManage }: { customers: Row[]; canManage: boolean }) {
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
   const [editing, setEditing] = useState<CustomerFormValue | null>(null);
-  const filtered = customers.filter(c => (type === "All" || c.type === type) && `${c.name} ${c.city ?? ""} ${c.contactName ?? ""}`.toLowerCase().includes(q.toLowerCase()));
+  const filtered = customers.filter(c => (type === "All" || c.type === type) && `${c.name} ${c.city ?? ""} ${c.country} ${c.contactName ?? ""}`.toLowerCase().includes(q.toLowerCase()));
 
   return (
     <div className="space-y-4">
@@ -37,7 +37,7 @@ export default function CustomerList({ customers, canManage }: { customers: Row[
             <tbody className="divide-y divide-slate-100">
               {filtered.length ? filtered.map(c => (
                 <tr key={c.id} className="hover:bg-slate-50">
-                  <td className="px-6 py-4"><Link href={`/modules/sales/customers/${c.id}`} className="font-semibold text-slate-800 hover:text-blue-700">{c.name}</Link><p className="text-xs text-slate-500">{c.customerNo}{c.city ? ` · ${c.city}` : ""}</p></td>
+                  <td className="px-6 py-4"><Link href={`/modules/sales/customers/${c.id}`} className="font-semibold text-slate-800 hover:text-blue-700">{c.name}</Link><p className="text-xs text-slate-500">{c.customerNo}{c.city ? ` · ${c.city}` : ""}{c.country !== "Indonesia" ? ` · ${c.country} (${c.currency})` : ""}</p></td>
                   <td className="px-6 py-4">{c.type}</td>
                   <td className="px-6 py-4"><p className="text-slate-800">{c.contactName ?? "—"}</p><p className="text-xs text-slate-500">{c.contactPhone}</p></td>
                   <td className="px-6 py-4 text-right tabular-nums">{c._count.quotations} / {c._count.salesOrders} / {c._count.contracts}</td>
