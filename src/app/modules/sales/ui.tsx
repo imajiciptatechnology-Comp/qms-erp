@@ -9,6 +9,9 @@ export const inputCls = "w-full px-3 py-2 bg-white border border-slate-200 round
 export const labelCls = "text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5 block";
 export const btnPrimary = "bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors shadow-sm";
 export const btnSecondary = "bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 border border-slate-200 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors";
+/** Tombol kecil untuk aksi di dalam baris / kartu. */
+export const btnPrimarySm = "bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-xs font-semibold transition-colors shadow-sm whitespace-nowrap";
+export const btnSecondarySm = "bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 border border-slate-200 px-3 py-1.5 rounded-lg inline-flex items-center gap-1.5 text-xs font-semibold transition-colors whitespace-nowrap";
 export const btnDanger = "bg-white hover:bg-red-50 disabled:opacity-60 text-red-600 border border-red-200 px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors";
 
 export function StatusBadge({ status }: { status: string }) {

@@ -10,7 +10,13 @@ import { ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } fr
 
 type Opp = {
   id: string; opportunityNo: string; title: string; stage: string; source: string; estimatedValue: number; probability: number;
-  expectedCloseDate: string | null; tenderNo?: string | null; tenderDeadline?: string | null; salesName: string; lostReason: string | null; notes: string | null; customer: { id: string; name: string };
+  expectedCloseDate: string | null; tenderNo?: string | null; tenderDeadline?: string | null; tenderChecklistJson?: string; salesName: string; lostReason: string | null; notes: string | null; customer: { id: string; name: string };
+};
+
+/** "7/10 siap" dari checklist dokumen tender (kosong = tidak ditampilkan). */
+const checklistOf = (o: Opp) => {
+  const list = JSON.parse(o.tenderChecklistJson || "[]") as { done: boolean }[];
+  return list.length ? `${list.filter(i => i.done).length}/${list.length} siap` : null;
 };
 
 const COLUMN_ACCENT: Record<string, string> = {
@@ -54,7 +60,7 @@ export default function PipelineBoard({ opportunities, customers, canManage }: {
                 {rows.map(o => (
                   <article key={o.id} className="bg-white rounded-lg border border-slate-200 p-3 shadow-sm">
                     <p className="text-[11px] font-semibold text-slate-400">{o.opportunityNo} · {o.source}</p>
-                    <h3 className="text-sm font-semibold text-slate-800 leading-snug mt-0.5">{o.title}</h3>
+                    <h3 className="text-sm font-semibold text-slate-800 leading-snug mt-0.5"><Link href={`/modules/sales/pipeline/${o.id}`} className="hover:text-blue-700 hover:underline">{o.title}</Link></h3>
                     <Link href={`/modules/sales/customers/${o.customer.id}`} className="text-xs text-blue-600 hover:underline block mt-1 truncate">{o.customer.name}</Link>
                     <div className="flex items-center justify-between mt-2 text-xs">
                       <span className="font-semibold text-slate-800 tabular-nums">{rupiahShort(o.estimatedValue)}</span>
@@ -62,6 +68,7 @@ export default function PipelineBoard({ opportunities, customers, canManage }: {
                     </div>
                     <p className="text-xs text-slate-500 mt-1">{o.salesName}{o.expectedCloseDate ? ` · target ${o.expectedCloseDate}` : ""}</p>
                     {o.tenderDeadline && <p className={`text-xs mt-0.5 font-medium ${o.tenderDeadline < today() ? "text-slate-400" : "text-amber-700"}`}>Tender{o.tenderNo ? ` ${o.tenderNo}` : ""} · batas {o.tenderDeadline}</p>}
+                    {checklistOf(o) && <p className="text-xs text-slate-500 mt-0.5">Dokumen tender {checklistOf(o)}</p>}
                     {o.lostReason && <p className="text-xs text-red-700 mt-1">Alasan: {o.lostReason}</p>}
                     {o.notes && !o.lostReason && <p className="text-xs text-slate-600 mt-1 line-clamp-2">{o.notes}</p>}
                     {canManage && (

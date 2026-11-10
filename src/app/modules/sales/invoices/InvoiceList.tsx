@@ -2,11 +2,11 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Receipt, Search } from "lucide-react";
+import { Plus, Receipt, Search, FileSpreadsheet } from "lucide-react";
 import EmptyTableRow from "@/components/ui/EmptyTableRow";
 import TableFooter from "@/components/ui/TableFooter";
 import { daysBetween, invoiceState, rupiahShort, toIdr, today, money } from "../lib";
-import { StatusBadge, btnPrimary, inputCls } from "../ui";
+import { StatusBadge, btnPrimary, inputCls, btnSecondary } from "../ui";
 
 type Row = { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string; currency: string; exchangeRate: number; customer: { name: string }; salesOrder: { soNo: string } | null };
 
@@ -21,6 +21,7 @@ const BUCKETS = [
 export default function InvoiceList({ invoices, canFinance }: { invoices: Row[]; canFinance: boolean }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState("Open");
+  const [month, setMonth] = useState(today().slice(0, 7));
   const rows = useMemo(() => invoices.map(i => ({ ...i, state: invoiceState(i), outstanding: i.status === "Cancelled" ? 0 : i.total - i.paidAmount })), [invoices]);
   const openRows = rows.filter(r => r.outstanding > 0);
   const aging = BUCKETS.map(b => {
@@ -54,7 +55,16 @@ export default function InvoiceList({ invoices, canFinance }: { invoices: Row[];
         <select aria-label="Filter status" value={filter} onChange={e => setFilter(e.target.value)} className={`${inputCls} sm:w-52`}>
           <option value="Open">Belum lunas</option><option value="Overdue">Lewat jatuh tempo</option><option value="Paid">Lunas</option><option value="Cancelled">Dibatalkan</option><option value="All">Semua</option>
         </select>
-        {canFinance && <Link href="/modules/sales/invoices/new" className={`${btnPrimary} sm:ml-auto justify-center`}><Plus className="w-4 h-4" /> New Invoice</Link>}
+        {canFinance && (
+          <div className="flex gap-2 sm:ml-auto">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor="faktur-month" className="sr-only">Bulan rekap faktur</label>
+              <input id="faktur-month" type="month" value={month} onChange={e => setMonth(e.target.value)} className="px-2 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700" />
+              <a href={`/modules/sales/invoices/rekap-faktur?month=${month}`} className={btnSecondary} title="Rekap invoice ber-PPN & nota kredit (CSV) sebagai bahan input faktur pajak di Coretax"><FileSpreadsheet className="w-4 h-4" /> Rekap faktur</a>
+            </div>
+            <Link href="/modules/sales/invoices/new" className={`${btnPrimary} justify-center`}><Plus className="w-4 h-4" /> New Invoice</Link>
+          </div>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">

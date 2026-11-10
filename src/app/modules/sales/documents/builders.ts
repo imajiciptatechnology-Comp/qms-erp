@@ -6,7 +6,7 @@ import { amountInWords, bulanTahun, dateEn, hari, safeName, tanggal, terbilang }
 import { LETTERHEAD as L } from "./letterhead";
 import type { Block, DocModel } from "./model";
 
-export const DOC_KINDS = ["quotation", "invoice", "receipt", "contract", "bast", "order-confirmation", "proforma-invoice", "reminder", "packing-list", "delivery-order", "commercial-invoice", "training-report", "training-certificate"] as const;
+export const DOC_KINDS = ["quotation", "invoice", "receipt", "contract", "bast", "order-confirmation", "proforma-invoice", "credit-note", "reminder", "packing-list", "delivery-order", "commercial-invoice", "training-report", "training-certificate"] as const;
 /** Dokumen milik modul Contract & Shipping / Training & CS (akses mengikuti modul tsb). */
 export const SHIPPING_DOCS: DocKind[] = ["packing-list", "delivery-order", "commercial-invoice"];
 export const SERVICE_DOCS: DocKind[] = ["training-report", "training-certificate"];
@@ -588,6 +588,48 @@ async function commercialInvoice(id: string): Promise<DocModel | null> {
   };
 }
 
+// ---------------------------------------------------------
+// Nota kredit
+// ---------------------------------------------------------
+async function creditNote(id: string): Promise<DocModel | null> {
+  const c = await prisma.creditNote.findUnique({ where: { id }, include: { customer: true, invoice: { include: { salesOrder: true } } } });
+  if (!c) return null;
+  const en = isExportCustomer(c.customer);
+  const cur = c.currency;
+  const m = (n: number) => money(n, cur);
+  const inv = c.invoice;
+  const d = (iso?: string | null) => (en ? dateEn(iso) : tanggal(iso));
+  return {
+    lang: en ? "en" : "id",
+    fileName: safeName(`${en ? "Credit Note" : "Nota Kredit"} ${c.creditNoteNo} - ${c.customer.name}`),
+    title: en ? "CREDIT NOTE" : "NOTA KREDIT", number: c.creditNoteNo,
+    recipient: { label: en ? "To" : "Kepada", name: c.customer.name, lines: lines(c.customer.address, countryLine(c.customer, c.customer.address), !en && c.customer.npwp ? `NPWP ${c.customer.npwp}` : null) },
+    meta: [
+      [en ? "Date" : "Tanggal", d(c.date)],
+      [en ? "Invoice" : "Atas invoice", `${inv.invoiceNo} (${d(inv.invoiceDate)})`],
+      ...(inv.salesOrder ? [["PO", inv.salesOrder.customerPoNo] as [string, string]] : []),
+      ...(!en && inv.fakturPajakNo ? [["Faktur pajak asal", inv.fakturPajakNo] as [string, string]] : []),
+    ],
+    blocks: [
+      { type: "para", text: en
+        ? `We hereby credit your account for the following, reducing the amount due on invoice ${inv.invoiceNo}:`
+        : `Dengan ini kami mengkreditkan tagihan Bapak/Ibu atas invoice ${inv.invoiceNo} dengan rincian sebagai berikut:` },
+      { type: "table", columns: [{ label: "No", width: 6, align: "center" }, { label: en ? "Description" : "Keterangan", width: 70 }, { label: `${en ? "Amount" : "Jumlah"}${cur === "IDR" && !en ? "" : ` (${cur})`}`, width: 24, align: "right" }],
+        rows: [["1", { text: c.reason, bold: true }, num(c.subtotal, cur)]] },
+      { type: "totals", rows: [
+        [en ? "Subtotal" : "DPP", m(c.subtotal)],
+        ...(c.taxAmount > 0 || !en ? [[`${en ? "VAT" : "PPN"} ${inv.taxPercent}%`, m(c.taxAmount)] as [string, string]] : []),
+      ], total: [en ? "TOTAL CREDIT" : "TOTAL KREDIT", m(c.total)] },
+      { type: "words", text: amountInWords(c.total, cur, en ? "en" : "id") },
+      { type: "kv", rows: [
+        [en ? "Invoice total" : "Total invoice", m(inv.total)],
+        [en ? "Balance after credit" : "Sisa tagihan setelah kredit", m(Math.max(0, roundMoney(inv.total - inv.paidAmount, cur)))],
+      ] },
+    ],
+    signatures: [{ lead: `${L.city}, ${d(c.date)}`, org: L.company, name: S.finance.name, title: S.finance.title }],
+  };
+}
+
 export async function buildDocument(kind: DocKind, id: string): Promise<DocModel | null> {
   switch (kind) {
     case "packing-list": return shipmentDoc(id, "packing-list");
@@ -601,6 +643,7 @@ export async function buildDocument(kind: DocKind, id: string): Promise<DocModel
     case "bast": return salesOrderDoc(id, "bast");
     case "order-confirmation": return salesOrderDoc(id, "order-confirmation");
     case "proforma-invoice": return proformaInvoice(id);
+    case "credit-note": return creditNote(id);
     case "commercial-invoice": return commercialInvoice(id);
     case "reminder": return reminder(id);
   }

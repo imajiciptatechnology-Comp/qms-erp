@@ -7,11 +7,11 @@ import EmptyTableRow from "@/components/ui/EmptyTableRow";
 import TableFooter from "@/components/ui/TableFooter";
 import { CUSTOMER_TYPES } from "../lib";
 import { btnPrimary, inputCls } from "../ui";
-import CustomerModal, { type CustomerFormValue } from "./CustomerModal";
+import CustomerModal, { type AgentOption, type CustomerFormValue } from "./CustomerModal";
 
 type Row = { id: string; customerNo: string; name: string; type: string; city: string | null; country: string; currency: string; contactName: string | null; contactPhone: string | null; _count: { quotations: number; salesOrders: number; contracts: number } };
 
-export default function CustomerList({ customers, canManage }: { customers: Row[]; canManage: boolean }) {
+export default function CustomerList({ customers, canManage, agents }: { customers: Row[]; canManage: boolean; agents: AgentOption[] }) {
   const [q, setQ] = useState("");
   const [type, setType] = useState("All");
   const [editing, setEditing] = useState<CustomerFormValue | null>(null);
@@ -48,7 +48,7 @@ export default function CustomerList({ customers, canManage }: { customers: Row[
         </div>
         <TableFooter filtered={filtered.length} total={customers.length} label="customer" />
       </div>
-      <CustomerModal value={editing} onClose={() => setEditing(null)} />
+      <CustomerModal key={editing ? editing.id ?? "new" : "closed"} value={editing} agents={agents} onClose={() => setEditing(null)} />
     </div>
   );
 }

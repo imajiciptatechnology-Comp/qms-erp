@@ -10,7 +10,7 @@ import { AiError } from "@/lib/ai";
 import { generateQuotationDraft } from "./ai/draftQuotation";
 import { generateContractDraft } from "./ai/draftContract";
 import { REMINDER_LEVELS, generateReminderLetter } from "./ai/reminderLetter";
-import { CONTRACT_REVIEW_ITEMS, CURRENCIES, PAYMENT_SCHEDULES, PERM, STAGE_PROBABILITY, CONTRACT_APPROVAL_BUSINESS_DAYS, addBusinessDays, addDays, computeTotals, contractBillingPeriods, defaultTaxFor, lineTotal, money, needsApproval, roundMoney, salesAccess, today, type LineInput } from "./lib";
+import { CONTRACT_REVIEW_ITEMS, CURRENCIES, PAYMENT_SCHEDULES, PERM, STAGE_PROBABILITY, CONTRACT_APPROVAL_BUSINESS_DAYS, addBusinessDays, addDays, computeTotals, contractBillingPeriods, defaultTaxFor, defaultTenderChecklist, lineTotal, money, needsApproval, roundMoney, salesAccess, today, type LineInput } from "./lib";
 import { buildClauses, type Clause } from "./documents/contractTemplates";
 import { addHistory, fillQuotationDefaults, firstHistory, insertDraftQuotation, nextDocNo, quotationData, type QuotationInput } from "./server";
 
@@ -133,7 +133,7 @@ export async function getSalesOrder(id: string) {
   return prisma.salesOrder.findUnique({
     where: { id },
     include: {
-      customer: true, quotation: { select: { id: true, quotationNo: true, revision: true } }, items: { orderBy: { sortOrder: "asc" } }, invoices: { orderBy: { invoiceDate: "asc" } }, contracts: true,
+      customer: true, agent: { select: { id: true, name: true } }, quotation: { select: { id: true, quotationNo: true, revision: true } }, items: { orderBy: { sortOrder: "asc" } }, invoices: { orderBy: { invoiceDate: "asc" } }, contracts: true,
       salesShipments: { select: { id: true, shipmentNo: true, status: true, mode: true, destination: true, exceptionStatus: true }, orderBy: { createdAt: "asc" } },
       serviceJobs: { select: { id: true, jobNo: true, status: true, type: true, startDate: true }, orderBy: { createdAt: "asc" } },
     },
@@ -149,7 +149,7 @@ export async function getInvoice(id: string) {
   await guard();
   return prisma.invoice.findUnique({ where: { id }, include: {
     customer: true, salesOrder: { select: { id: true, soNo: true, customerPoNo: true } }, contract: { select: { id: true, contractNo: true, title: true } },
-    payments: { orderBy: { paymentDate: "asc" } }, items: { orderBy: { sortOrder: "asc" } }, reminders: { orderBy: { date: "desc" } },
+    payments: { orderBy: { paymentDate: "asc" } }, items: { orderBy: { sortOrder: "asc" } }, reminders: { orderBy: { date: "desc" } }, creditNotes: { orderBy: { date: "asc" } },
   } });
 }
 
@@ -234,14 +234,14 @@ export type CustomerInput = {
   name: string; type: string; npwp?: string; address?: string; city?: string;
   contactName?: string; contactTitle?: string; contactEmail?: string; contactPhone?: string; paymentTerms: string; notes?: string;
   signatoryName?: string; signatoryTitle?: string;
-  country?: string; currency?: string;
+  country?: string; currency?: string; agentId?: string | null;
 };
 
 export async function saveCustomer(id: string | null, data: CustomerInput) {
   return run(async () => {
     const user = await guard("manage");
     if (!data.name?.trim()) throw new Error("Nama customer wajib diisi.");
-    data = { ...data, country: data.country?.trim() || "Indonesia", currency: (CURRENCIES as readonly string[]).includes(data.currency ?? "") ? data.currency : "IDR" };
+    data = { ...data, country: data.country?.trim() || "Indonesia", currency: (CURRENCIES as readonly string[]).includes(data.currency ?? "") ? data.currency : "IDR", agentId: data.agentId || null };
     if (id) {
       const old = await prisma.customer.findUniqueOrThrow({ where: { id } });
       await prisma.customer.update({ where: { id }, data: { ...data, historyJson: addHistory(old.historyJson, user.name, "Data customer diperbarui") } });
@@ -257,7 +257,7 @@ export type ProductInput = {
   sku: string; name: string; category: string; brand: string; model?: string; unit: string; price: number;
   availability: string; leadTimeWeeks?: number | null; warrantyMonths: number; requiresCalibration: boolean;
   calibrationIntervalMonths?: number | null; specs?: string; isActive: boolean;
-  hsCode?: string | null;
+  hsCode?: string | null; tkdnPercent?: number | null; tkdnCertNo?: string | null;
 };
 
 export async function saveProduct(id: string | null, data: ProductInput) {
@@ -265,7 +265,8 @@ export async function saveProduct(id: string | null, data: ProductInput) {
     await guard("manage");
     if (!data.sku?.trim() || !data.name?.trim()) throw new Error("Kode dan nama produk wajib diisi.");
     if (!(data.price >= 0)) throw new Error("Harga tidak valid.");
-    data = { ...data, hsCode: data.hsCode?.trim() || null };
+    if (data.tkdnPercent != null && !(data.tkdnPercent >= 0 && data.tkdnPercent <= 100)) throw new Error("TKDN harus 0–100%.");
+    data = { ...data, hsCode: data.hsCode?.trim() || null, tkdnPercent: data.tkdnPercent ?? null, tkdnCertNo: data.tkdnCertNo?.trim() || null };
     if (id) {
       await prisma.product.update({ where: { id }, data });
       return id;
@@ -289,7 +290,8 @@ export async function createOpportunity(data: OpportunityInput) {
     const rows = await prisma.opportunity.findMany({ where: { opportunityNo: { startsWith: `OPP-${year}-` } }, select: { opportunityNo: true } });
     const max = rows.reduce((m, r) => Math.max(m, Number(r.opportunityNo.split("-").pop()) || 0), 0);
     const created = await prisma.opportunity.create({ data: {
-      ...data, tenderNo: data.tenderNo?.trim() || null, tenderDeadline: data.tenderDeadline || null, opportunityNo: `OPP-${year}-${String(max + 1).padStart(3, "0")}`, stage: "Lead", probability: STAGE_PROBABILITY.Lead,
+      ...data, tenderNo: data.tenderNo?.trim() || null, tenderDeadline: data.tenderDeadline || null,
+      tenderChecklistJson: /Tender/i.test(data.source) ? JSON.stringify(defaultTenderChecklist(data.source)) : "[]", opportunityNo: `OPP-${year}-${String(max + 1).padStart(3, "0")}`, stage: "Lead", probability: STAGE_PROBABILITY.Lead,
       salesName: user.name, createdAt: today(), historyJson: firstHistory(user.name, "Opportunity dibuat"),
     } });
     return created.id;
@@ -425,7 +427,7 @@ export async function createSalesOrderFromQuotation(formData: FormData) {
     const schedule = PAYMENT_SCHEDULES[scheduleKey];
     if (!schedule) throw new Error("Pilih skema termin pembayaran.");
 
-    const q = await prisma.quotation.findUniqueOrThrow({ where: { id: quotationId }, include: { items: true, customer: true } });
+    const q = await prisma.quotation.findUniqueOrThrow({ where: { id: quotationId }, include: { items: true, customer: { include: { agent: true } } } });
     if (q.status !== "Accepted") throw new Error("Sales Order hanya bisa dibuat dari penawaran yang Accepted.");
     const customerPoFile = file && file.size > 0 ? await uploadToStorage("sales/po", file) : null;
 
@@ -435,6 +437,8 @@ export async function createSalesOrderFromQuotation(formData: FormData) {
       contractReviewJson: JSON.stringify(CONTRACT_REVIEW_ITEMS.map(item => ({ item, ok: false }))), paymentScheduleJson: JSON.stringify(schedule),
       subtotal: roundMoney(q.subtotal - q.discountAmount, q.currency), taxAmount: q.taxAmount, total: q.total, salesName: q.salesName, createdAt: today(),
       currency: q.currency, exchangeRate: q.exchangeRate, taxPercent: q.taxPercent,
+      // Komisi mengikuti agen customer (aktif) saat PO diterima.
+      ...(q.customer.agent?.status === "Active" ? { agentId: q.customer.agent.id, commissionPercent: q.customer.agent.commissionPercent } : {}),
       historyJson: firstHistory(user.name, `Dibuat dari PO ${customerPoNo} (penawaran ${q.quotationNo} Rev.${q.revision})`),
       items: { create: q.items.map(i => ({ productId: i.productId, description: i.description, qty: i.qty, unit: i.unit, unitPrice: i.unitPrice, lineTotal: i.lineTotal, sortOrder: i.sortOrder })) },
     } });

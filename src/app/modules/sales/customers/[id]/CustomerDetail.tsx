@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Pencil, Receipt, ShoppingCart, Target } from "lucide-react";
 import { contractState, invoiceState, isExportCustomer, rupiahShort, toIdr, money } from "../../lib";
 import { Card, History, InfoRow, StatCard, StatusBadge, btnSecondary } from "../../ui";
-import CustomerModal, { type CustomerFormValue } from "../CustomerModal";
+import CustomerModal, { type AgentOption, type CustomerFormValue } from "../CustomerModal";
 
 type C = {
   id: string; customerNo: string; name: string; type: string; npwp: string | null; address: string | null; city: string | null; contactName: string | null; contactTitle: string | null;
@@ -15,13 +15,14 @@ type C = {
   quotations: { id: string; quotationNo: string; revision: number; subject: string; date: string; status: string; total: number; currency: string }[];
   salesOrders: { id: string; soNo: string; customerPoNo: string; orderDate: string; status: string; total: number; currency: string; exchangeRate: number }[];
   invoices: { id: string; invoiceNo: string; termLabel: string; dueDate: string; status: string; total: number; paidAmount: number; currency: string; exchangeRate: number }[];
-  country: string; currency: string;
+  country: string; currency: string; agentId: string | null;
   contracts: { id: string; contractNo: string; title: string; type: string; endDate: string; status: string }[];
 };
 
 const n = (v: string | null) => v ?? undefined;
 
-export default function CustomerDetail({ c, canManage }: { c: C; canManage: boolean }) {
+export default function CustomerDetail({ c, canManage, agents }: { c: C; canManage: boolean; agents: AgentOption[] }) {
+  const agent = agents.find(a => a.id === c.agentId);
   const [editing, setEditing] = useState<CustomerFormValue | null>(null);
   const revenue = c.salesOrders.filter(s => s.status !== "Cancelled").reduce((s, o) => s + toIdr(o.total, o), 0);
   const outstanding = c.invoices.filter(i => !["Paid", "Cancelled"].includes(i.status)).reduce((s, i) => s + toIdr(i.total - i.paidAmount, i), 0);
@@ -33,13 +34,13 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
         <div>
           <Link href="/modules/sales/customers" className="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1"><ArrowLeft className="w-4 h-4" /> Customers</Link>
           <h2 className="text-xl font-bold text-slate-800 mt-1">{c.name}</h2>
-          <p className="text-sm text-slate-500">{c.customerNo} · {c.type}{c.city ? ` · ${c.city}` : ""}{isExportCustomer(c) ? ` · ${c.country} · ekspor (${c.currency})` : ""}</p>
+          <p className="text-sm text-slate-500">{c.customerNo} · {c.type}{c.city ? ` · ${c.city}` : ""}{isExportCustomer(c) ? ` · ${c.country} · ekspor (${c.currency})` : ""}{agent ? ` · agen ${agent.name}` : ""}</p>
         </div>
         {canManage && (
           <button className={btnSecondary} onClick={() => setEditing({
             id: c.id, name: c.name, type: c.type, npwp: n(c.npwp), address: n(c.address), city: n(c.city), contactName: n(c.contactName), contactTitle: n(c.contactTitle),
             contactEmail: n(c.contactEmail), contactPhone: n(c.contactPhone), paymentTerms: c.paymentTerms, notes: n(c.notes),
-            signatoryName: n(c.signatoryName), signatoryTitle: n(c.signatoryTitle), country: c.country, currency: c.currency,
+            signatoryName: n(c.signatoryName), signatoryTitle: n(c.signatoryTitle), country: c.country, currency: c.currency, agentId: c.agentId,
           })}><Pencil className="w-4 h-4" /> Edit</button>
         )}
       </div>
@@ -109,7 +110,7 @@ export default function CustomerDetail({ c, canManage }: { c: C; canManage: bool
           <Card title="Aktivitas"><History json={c.historyJson} /></Card>
         </div>
       </div>
-      <CustomerModal value={editing} onClose={() => setEditing(null)} />
+      <CustomerModal key={editing ? editing.id ?? "new" : "closed"} value={editing} agents={agents} onClose={() => setEditing(null)} />
     </div>
   );
 }

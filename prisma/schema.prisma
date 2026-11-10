@@ -570,6 +570,11 @@ model Customer {
   country        String          @default("Indonesia")
   /// Mata uang default untuk penawaran baru.
   currency       String          @default("IDR")
+  /// Agen / kantor perwakilan yang menangani customer ini (komisi dari Sales Order).
+  agentId        String?
+  agent          Agent?          @relation(fields: [agentId], references: [id])
+  guarantees     Guarantee[]
+  creditNotes    CreditNote[]
 }
 
 model Product {
@@ -592,6 +597,9 @@ model Product {
   createdAt                 String
   /// Kode HS (Harmonized System) untuk commercial invoice / PEB.
   hsCode                    String?
+  /// Tingkat Komponen Dalam Negeri (%) sesuai sertifikat TKDN Kemenperin, untuk tender pemerintah.
+  tkdnPercent               Float?
+  tkdnCertNo                String?
 }
 
 model Opportunity {
@@ -610,6 +618,11 @@ model Opportunity {
   /// Tender (LPSE / UN / donor): nomor paket & batas pemasukan penawaran.
   tenderNo          String?
   tenderDeadline    String?
+  /// Checklist dokumen tender [{ name, done, note? }].
+  tenderChecklistJson String    @default("[]")
+  /// Syarat minimal TKDN (%) pada paket tender pemerintah.
+  tkdnRequired      Float?
+  guarantees        Guarantee[]
   createdAt         String
   historyJson       String      @default("[]")
   customer          Customer    @relation(fields: [customerId], references: [id])
@@ -711,6 +724,13 @@ model SalesOrder {
   lcLatestShipment    String?
   lcAmount            Float?
   lcNotes             String?
+  /// Komisi agen: dicatat saat SO dibuat dari agen customer; terutang setelah SO lunas.
+  agentId             String?
+  commissionPercent   Float?
+  commissionPaidAt    String?
+  commissionPaidRef   String?
+  agent               Agent?           @relation(fields: [agentId], references: [id])
+  guarantees          Guarantee[]
   customer            Customer         @relation(fields: [customerId], references: [id])
   quotation           Quotation?       @relation(fields: [quotationId], references: [id])
   items               SalesOrderItem[]
@@ -763,6 +783,81 @@ model Invoice {
   currency      String            @default("IDR")
   exchangeRate  Float             @default(1)
   taxPercent    Float             @default(11)
+  creditNotes   CreditNote[]
+}
+
+/// Nota kredit (pengurang tagihan): retur, koreksi harga, potongan. Dicatat juga sebagai Payment
+/// bermetode "Nota Kredit" supaya sisa tagihan & gerbang pelunasan otomatis ikut berkurang.
+model CreditNote {
+  id           String   @id @default(cuid())
+  creditNoteNo String   @unique
+  invoiceId    String
+  customerId   String
+  date         String
+  reason       String
+  subtotal     Float
+  taxAmount    Float
+  total        Float
+  currency     String   @default("IDR")
+  paymentId    String?
+  createdBy    String
+  createdAt    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer     Customer @relation(fields: [customerId], references: [id])
+}
+
+/// Jaminan bank / asuransi (surety bond) untuk tender & kontrak: penawaran, pelaksanaan, uang muka, pemeliharaan.
+model Guarantee {
+  id            String       @id @default(cuid())
+  guaranteeNo   String // nomor dari bank / penerbit
+  type          String // Jaminan Penawaran | Jaminan Pelaksanaan | Jaminan Uang Muka | Jaminan Pemeliharaan
+  issuer        String
+  amount        Float
+  currency      String       @default("IDR")
+  issueDate     String
+  expiryDate    String
+  status        String       @default("Active") // Active | Released | Claimed
+  customerId    String
+  opportunityId String?
+  salesOrderId  String?
+  fileUrl       String?
+  notes         String?
+  createdBy     String
+  createdAt     String
+  historyJson   String       @default("[]")
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  opportunity   Opportunity? @relation(fields: [opportunityId], references: [id])
+  salesOrder    SalesOrder?  @relation(fields: [salesOrderId], references: [id])
+}
+
+/// Agen / distributor / kantor perwakilan luar negeri dengan komisi default.
+model Agent {
+  id                String       @id @default(cuid())
+  agentNo           String       @unique
+  name              String
+  countries         String // daftar negara, dipisah koma
+  contactName       String?
+  email             String?
+  phone             String?
+  commissionPercent Float        @default(5)
+  status            String       @default("Active") // Active | Inactive
+  notes             String?
+  createdAt         String
+  customers         Customer[]
+  salesOrders       SalesOrder[]
+}
+
+/// Target penjualan per bulan (Rupiah). salesName "" = target tim.
+model SalesTarget {
+  id        String @id @default(cuid())
+  year      Int
+  month     Int
+  salesName String @default("")
+  amount    Float
+  updatedBy String?
+  updatedAt String?
+
+  @@unique([year, month, salesName])
 }
 
 /// Rincian invoice manual / dari kontrak (invoice per termin SO tidak memakai tabel ini).

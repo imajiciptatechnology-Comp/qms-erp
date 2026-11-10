@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Ban, Banknote, Loader2, MailWarning, X } from "lucide-react";
+import { ArrowLeft, Ban, Banknote, FileMinus, Loader2, MailWarning, X } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
 import { cancelInvoice, createPaymentReminder, recordPayment, updateInvoiceTax } from "../../actions";
-import { daysBetween, invoiceState, today, type SalesAccess, money } from "../../lib";
+import { createCreditNote } from "../../financeActions";
+import { daysBetween, invoiceState, roundMoney, today, type SalesAccess, money } from "../../lib";
 import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../../ui";
 
 type Inv = {
@@ -18,6 +19,7 @@ type Inv = {
   payments: { id: string; paymentDate: string; amount: number; method: string; reference: string | null; proofUrl: string | null; receivedBy: string; receiptNo: string | null }[];
   items: { id: string; description: string; qty: number; unit: string; unitPrice: number; lineTotal: number }[];
   reminders: { id: string; letterNo: string; level: number; date: string; subject: string; createdBy: string }[];
+  creditNotes: { id: string; creditNoteNo: string; date: string; reason: string; subtotal: number; taxAmount: number; total: number; paymentId: string | null; createdBy: string }[];
 };
 
 export default function InvoiceDetail({ inv, access }: { inv: Inv; access: SalesAccess }) {
@@ -25,6 +27,10 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
   const pay = useAction();
   const remind = useAction();
   const [payOpen, setPayOpen] = useState(false);
+  const cn = useAction();
+  const [cnOpen, setCnOpen] = useState(false);
+  const [cnDpp, setCnDpp] = useState(0);
+  const cnTax = roundMoney(cnDpp * inv.taxPercent / 100, inv.currency);
   const state = invoiceState(inv);
   const remaining = inv.total - inv.paidAmount;
   const f = access.canFinance;
@@ -41,6 +47,7 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
           <DocLinks kind="invoice" id={inv.id} />
           {f && !["Paid", "Cancelled"].includes(inv.status) && <>
             {inv.paidAmount === 0 && <button className={btnDanger} disabled={pending} onClick={() => { const r = prompt("Alasan pembatalan invoice:"); if (r) exec(() => cancelInvoice(inv.id, r)); }}><Ban className="w-4 h-4" /> Batalkan</button>}
+            <button className={btnSecondary} onClick={() => { cn.setError(null); setCnDpp(0); setCnOpen(true); }}><FileMinus className="w-4 h-4" /> Nota kredit</button>
             <button className={btnPrimary} onClick={() => { pay.setError(null); setPayOpen(true); }}><Banknote className="w-4 h-4" /> Catat pembayaran</button>
           </>}
         </div>
@@ -90,7 +97,9 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
                         <td className="py-2.5">{p.method}{p.reference ? ` · ${p.reference}` : ""}{p.proofUrl && <a href={p.proofUrl} target="_blank" rel="noreferrer" className="ml-2 text-blue-700 hover:underline">bukti</a>}</td>
                         <td className="py-2.5 text-slate-500">{p.receivedBy}</td>
                         <td className="py-2.5 text-right tabular-nums font-medium">{money(p.amount, inv.currency)}</td>
-                        <td className="py-2.5 pl-3 text-right whitespace-nowrap"><DocLinks kind="receipt" id={p.id} label="Kwitansi" formats={["pdf"]} small /></td>
+                        <td className="py-2.5 pl-3 text-right whitespace-nowrap">{p.method === "Nota Kredit"
+                          ? (() => { const note = inv.creditNotes.find(c => c.paymentId === p.id); return note ? <DocLinks kind="credit-note" id={note.id} label="Nota kredit" formats={["pdf"]} small /> : null; })()
+                          : <DocLinks kind="receipt" id={p.id} label="Kwitansi" formats={["pdf"]} small />}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -98,6 +107,19 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
               </div>
             )}
           </Card>
+
+          {inv.creditNotes.length > 0 && (
+            <Card title={`Nota kredit (${inv.creditNotes.length})`}>
+              <ul className="divide-y divide-slate-100">
+                {inv.creditNotes.map(c => (
+                  <li key={c.id} className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-sm">
+                    <span><span className="font-semibold text-slate-800">{c.creditNoteNo}</span> <span className="text-slate-500">· {c.date} · {c.createdBy}</span><span className="block text-xs text-slate-500">{c.reason}</span></span>
+                    <span className="flex items-center gap-3"><span className="tabular-nums font-medium">− {money(c.total, inv.currency)}</span><DocLinks kind="credit-note" id={c.id} small /></span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {(state === "Overdue" || inv.reminders.length > 0) && (
             <Card title={`Surat pengingat pembayaran (${inv.reminders.length})`} actions={f && state === "Overdue" ? (
@@ -141,6 +163,37 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
         </div>
       </div>
 
+      <ModalShell isOpen={cnOpen} onClose={() => setCnOpen(false)}>
+        <form onSubmit={e => {
+          e.preventDefault();
+          const fd = Object.fromEntries(new FormData(e.currentTarget)) as Record<string, string>;
+          cn.exec(() => createCreditNote(inv.id, { date: fd.date, subtotal: cnDpp, reason: fd.reason }), () => setCnOpen(false));
+        }}>
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+            <h2 id="modal-title" className="font-bold text-slate-800">Terbitkan nota kredit</h2>
+            <button type="button" onClick={() => setCnOpen(false)} aria-label="Tutup" className="p-1 text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="p-6 space-y-4 overflow-y-auto">
+            <p className="text-sm text-slate-600">Mengurangi tagihan {inv.invoiceNo} (sisa <b className="tabular-nums">{money(remaining, inv.currency)}</b>), mis. karena retur, koreksi harga, atau potongan. PPN ikut dikoreksi {inv.taxPercent}%.</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div><label className={labelCls} htmlFor="cn-dpp">Nilai DPP ({inv.currency})</label><input id="cn-dpp" type="number" min={0} step="any" required value={cnDpp || ""} onChange={e => setCnDpp(Number(e.target.value))} className={inputCls} /></div>
+              <div><label className={labelCls} htmlFor="cn-date">Tanggal</label><input id="cn-date" name="date" type="date" required defaultValue={today()} className={inputCls} /></div>
+            </div>
+            <dl className="text-sm space-y-1 bg-slate-50 rounded-lg px-3 py-2">
+              <div className="flex justify-between"><dt className="text-slate-500">PPN {inv.taxPercent}%</dt><dd className="tabular-nums">{money(cnTax, inv.currency)}</dd></div>
+              <div className="flex justify-between font-semibold"><dt>Total nota kredit</dt><dd className="tabular-nums">{money(roundMoney(cnDpp + cnTax, inv.currency), inv.currency)}</dd></div>
+            </dl>
+            <div><label className={labelCls} htmlFor="cn-reason">Alasan</label><textarea id="cn-reason" name="reason" rows={2} required className={inputCls} placeholder="mis. Retur 1 unit modul sensor rusak saat pengiriman" /></div>
+            {inv.taxPercent > 0 && <p className="text-xs text-slate-500">Untuk invoice ber-PPN, buat juga faktur pajak pengganti / retur di Coretax sesuai nilai di atas.</p>}
+            <ErrorNote error={cn.error} />
+          </div>
+          <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-2">
+            <button type="button" className={btnSecondary} onClick={() => setCnOpen(false)}>Batal</button>
+            <button type="submit" className={btnPrimary} disabled={cn.pending || !(cnDpp > 0)}>{cn.pending ? "Menyimpan…" : "Terbitkan"}</button>
+          </div>
+        </form>
+      </ModalShell>
+
       <ModalShell isOpen={payOpen} onClose={() => setPayOpen(false)}>
         <form onSubmit={e => { e.preventDefault(); const fd = new FormData(e.currentTarget); pay.exec(() => recordPayment(fd), () => setPayOpen(false)); }}>
           <input type="hidden" name="invoiceId" value={inv.id} />
@@ -151,7 +204,7 @@ export default function InvoiceDetail({ inv, access }: { inv: Inv; access: Sales
           <div className="p-6 space-y-4 overflow-y-auto">
             <p className="text-sm text-slate-600">Sisa tagihan: <b className="tabular-nums">{money(remaining, inv.currency)}</b></p>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className={labelCls} htmlFor="pay-amt">Nominal (Rp)</label><input id="pay-amt" name="amount" type="number" min={1} max={Math.ceil(remaining)} step="any" required defaultValue={Math.round(remaining)} className={inputCls} /></div>
+              <div><label className={labelCls} htmlFor="pay-amt">Nominal ({inv.currency})</label><input id="pay-amt" name="amount" type="number" min={inv.currency === "IDR" ? 1 : 0.01} max={roundMoney(remaining, inv.currency)} step="any" required defaultValue={roundMoney(remaining, inv.currency)} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="pay-date">Tanggal terima</label><input id="pay-date" name="paymentDate" type="date" required max={today()} defaultValue={today()} className={inputCls} /></div>
             </div>
             <div className="grid grid-cols-2 gap-4">

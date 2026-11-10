@@ -4,8 +4,10 @@ import Link from "next/link";
 import { ArrowLeft, Ban, CheckSquare, FileText, Lock, Receipt, Square, Truck } from "lucide-react";
 import { advanceSalesOrder, cancelSalesOrder, createInvoiceFromSchedule, toggleContractReview } from "../../actions";
 import { JOB_STATUS_LABEL, PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, contractState, invoiceState, orderPaidStatus, rupiah, type SalesAccess, money } from "../../lib";
-import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnSecondary, useAction } from "../../ui";
+import { Card, DocLinks, ErrorNote, History, InfoRow, StatusBadge, btnDanger, btnPrimary, btnPrimarySm, btnSecondary, useAction } from "../../ui";
 import LetterOfCreditCard from "./LetterOfCreditCard";
+import CommissionCard from "./CommissionCard";
+import type { AgentOption } from "../../customers/CustomerModal";
 
 type SO = {
   id: string; soNo: string; customerPoNo: string; customerPoDate: string; customerPoFile: string | null; orderDate: string; status: string;
@@ -13,7 +15,8 @@ type SO = {
   subtotal: number; taxAmount: number; total: number; paymentScheduleJson: string; salesName: string; notes: string | null; historyJson: string;
   currency: string; exchangeRate: number; taxPercent: number;
   lcNo: string | null; lcIssuingBank: string | null; lcIssueDate: string | null; lcExpiryDate: string | null; lcLatestShipment: string | null; lcAmount: number | null; lcNotes: string | null;
-  customer: { id: string; name: string; country: string }; quotation: { id: string; quotationNo: string; revision: number } | null;
+  customer: { id: string; name: string; country: string };
+  agentId: string | null; commissionPercent: number | null; commissionPaidAt: string | null; commissionPaidRef: string | null; agent: { id: string; name: string } | null; quotation: { id: string; quotationNo: string; revision: number } | null;
   items: { id: string; description: string; qty: number; unit: string; unitPrice: number; lineTotal: number; serialNumbers: string | null }[];
   invoices: { id: string; invoiceNo: string; termLabel: string; invoiceDate: string; dueDate: string; total: number; paidAmount: number; status: string }[];
   contracts: { id: string; contractNo: string; type: string; title: string; endDate: string; status: string }[];
@@ -26,7 +29,7 @@ const STEPS = ["Contract Review", "Confirmed", "In Delivery", "Installed", "Comp
 // Confirmed → In Delivery lewat modul Contract & Shipping; In Delivery → Installed lewat BAST di modul Training & CS.
 const NEXT_LABEL: Record<string, string> = { "Contract Review": "Konfirmasi order", Installed: "Selesaikan order" };
 
-export default function OrderDetail({ so, access }: { so: SO; access: SalesAccess }) {
+export default function OrderDetail({ so, access, agents }: { so: SO; access: SalesAccess; agents: AgentOption[] }) {
   const { pending, error, exec } = useAction();
   const review = JSON.parse(so.contractReviewJson) as { item: string; ok: boolean; reviewedBy?: string; date?: string }[];
   const schedule = JSON.parse(so.paymentScheduleJson) as { label: string; percent: number; trigger: string }[];
@@ -159,7 +162,7 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
                     <ul className="space-y-1">
                       {so.salesShipments.map(s => <li key={s.id}><Link href={`/modules/contract-shipping/shipments/${s.id}`} className="text-blue-700 hover:underline">{s.shipmentNo}</Link> <span className="text-slate-500">· {SHIPMENT_STATUS_LABEL[s.status]} · {s.mode} → {s.destination}</span></li>)}
                     </ul>
-                  ) : so.status === "Confirmed" ? <Link href={`/modules/contract-shipping/shipments/new?so=${so.id}`} className="text-blue-700 hover:underline">Siapkan shipment</Link> : null}
+                  ) : so.status === "Confirmed" ? <Link href={`/modules/contract-shipping/shipments/new?so=${so.id}`} className={btnPrimarySm}><Truck className="w-3.5 h-3.5" aria-hidden /> Siapkan shipment</Link> : null}
                 </InfoRow>
                 <InfoRow label="Instalasi & training">
                   {so.serviceJobs.length ? (
@@ -171,6 +174,7 @@ export default function OrderDetail({ so, access }: { so: SO; access: SalesAcces
               </dl>
             </Card>
           )}
+          <CommissionCard so={so} fullyPaid={pay.fullyPaid} agents={agents} canEdit={access.canApprove} />
           <LetterOfCreditCard so={so} canEdit={(access.canManage || access.canFinance) && so.status !== "Cancelled"} />
           <Card title="Info order">
             <dl className="space-y-3">

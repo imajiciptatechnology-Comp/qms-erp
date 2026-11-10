@@ -15,17 +15,22 @@ type Opp = { id: string; opportunityNo: string; title: string; customerId: strin
 
 const emptyLine = (): LineInput => ({ productId: null, description: "", specs: "", qty: 1, unit: "Unit", unitPrice: 0, discountPercent: 0 });
 
-export default function QuotationForm({ customers, products, opportunities, initial, quotationId }: {
+export default function QuotationForm({ customers, products, opportunities, initial, quotationId, preset }: {
   customers: Customer[]; products: Product[]; opportunities: Opp[]; initial?: QuotationInput; quotationId?: string;
+  /** Isian awal dari halaman tender: customer & opportunity sudah dipilih. */
+  preset?: { customerId?: string; opportunityId?: string };
 }) {
+  const presetCustomer = customers.find(c => c.id === preset?.customerId);
+  const presetCur = presetCustomer?.currency || "IDR";
   const router = useRouter();
   const { pending, error, exec } = useAction();
   const [form, setForm] = useState<QuotationInput>(initial ?? {
-    customerId: "", opportunityId: null, date: today(), validUntil: addDays(today(), 30), subject: "", attention: "",
+    customerId: presetCustomer?.id ?? "", opportunityId: presetCustomer && opportunities.some(o => o.id === preset?.opportunityId && o.customerId === presetCustomer.id) ? preset!.opportunityId! : null,
+    date: today(), validUntil: addDays(today(), 30), subject: "", attention: presetCustomer?.contactName ?? "",
     // Teks surat & syarat sengaja kosong: diisi AI, atau teks baku saat disimpan (lihat fillQuotationDefaults).
     introText: "", closingText: "", discountPercent: 0,
     paymentTerms: "", deliveryTerms: "", warrantyTerms: "", notes: "", items: [emptyLine()],
-    currency: "IDR", exchangeRate: 1, taxPercent: TAX_PERCENT,
+    currency: presetCur, exchangeRate: presetCur === "IDR" ? 1 : DEFAULT_RATES[presetCur] ?? 1, taxPercent: presetCustomer ? defaultTaxFor(presetCustomer) : TAX_PERCENT,
   });
   const [aiRequest, setAiRequest] = useState("");
   const [aiPending, setAiPending] = useState(false);

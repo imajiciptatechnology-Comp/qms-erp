@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { CheckCircle2, Factory, Lock, Pencil, X } from "lucide-react";
+import { CheckCircle2, Factory, Lock, Pencil, Ship, X } from "lucide-react";
 import ModalShell from "@/components/ui/ModalShell";
 import { PRODUCTION_LABEL, PRODUCTION_STATUSES, today, money } from "@/app/modules/sales/lib";
-import { ErrorNote, StatusBadge, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "@/app/modules/sales/ui";
+import { ErrorNote, StatusBadge, btnPrimary, btnPrimarySm, btnSecondary, inputCls, labelCls, useAction } from "@/app/modules/sales/ui";
 import { updateProduction } from "../actions";
 
 type Order = {
@@ -57,7 +57,7 @@ export default function ProductionBoard({ orders, canManage }: { orders: Order[]
                     o.payment.fullyPaid || exception ? (
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-xs text-emerald-700 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" aria-hidden /> {o.payment.fullyPaid ? "Lunas" : "Izin khusus"}</span>
-                        {canManage && !o.salesShipments.some(s => s.status !== "Cancelled") && <Link href={`/modules/contract-shipping/shipments/new?so=${o.id}`} className="text-xs font-semibold text-blue-700 hover:underline">Buat shipment</Link>}
+                        {canManage && !o.salesShipments.some(s => s.status !== "Cancelled") && <Link href={`/modules/contract-shipping/shipments/new?so=${o.id}`} className={btnPrimarySm}><Ship className="w-3.5 h-3.5" aria-hidden /> Buat shipment</Link>}
                       </div>
                     ) : (
                       <p className="text-xs text-red-700 flex items-center gap-1"><Lock className="w-3.5 h-3.5" aria-hidden /> Belum lunas · sisa {money(o.payment.remaining, o.currency)}</p>

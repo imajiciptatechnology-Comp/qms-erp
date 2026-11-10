@@ -255,6 +255,12 @@ export const STATUS_COLORS: Record<string, string> = {
   Negotiation: "bg-amber-100 text-amber-800 border-amber-200",
   Won: "bg-emerald-100 text-emerald-700 border-emerald-200",
   Lost: "bg-red-100 text-red-700 border-red-200",
+  // Jaminan & komisi
+  Claimed: "bg-red-100 text-red-700 border-red-200",
+  Released: "bg-slate-100 text-slate-500 border-slate-200",
+  Accrued: "bg-slate-100 text-slate-700 border-slate-200",
+  Payable: "bg-amber-100 text-amber-800 border-amber-200",
+  Issued: "bg-sky-100 text-sky-700 border-sky-200",
 };
 
 // ---------------------------------------------------------
@@ -315,3 +321,47 @@ export function ticketOverdue(t: { status: string; responseDueAt: string; firstR
 
 export type ChecklistRow = { itemId?: string; item: string; serial: string; installed: boolean; tested: boolean; note?: string };
 export type Participant = { name: string; title?: string; attended: boolean; pre?: number | null; post?: number | null };
+
+// ---------------------------------------------------------
+// Tender, jaminan, agen, nota kredit, target
+// ---------------------------------------------------------
+
+export type ChecklistItem = { name: string; done: boolean; note?: string };
+/** Checklist dokumen tender awal: pengadaan pemerintah (LPSE) atau lembaga internasional (UN / donor). */
+export function defaultTenderChecklist(source: string): ChecklistItem[] {
+  const intl = /UN|Donor|Agen/i.test(source);
+  const names = intl
+    ? ["Company registration & profile", "UNGM / vendor registration", "Technical proposal & compliance matrix", "Financial proposal (price schedule)", "Brochures & technical specifications", "ISO 9001 certificate", "Manufacturer's authorization / origin statement", "Past performance references", "Bid security (bid bond)", "Signed bid form & declarations"]
+    : ["Dokumen kualifikasi (NIB, NPWP, akta, SBU/KBLI)", "Surat penawaran bermeterai", "Daftar kuantitas & harga", "Spesifikasi teknis & brosur", "Sertifikat TKDN produk", "Jaminan penawaran", "Surat dukungan / pernyataan pabrikan", "Sertifikat ISO 9001", "Daftar pengalaman pekerjaan sejenis", "Pakta integritas"];
+  return names.map(name => ({ name, done: false }));
+}
+
+export const GUARANTEE_TYPES = ["Jaminan Penawaran", "Jaminan Pelaksanaan", "Jaminan Uang Muka", "Jaminan Pemeliharaan"];
+export const GUARANTEE_STATUS_LABEL: Record<string, string> = { Active: "Aktif", Released: "Dikembalikan", Claimed: "Dicairkan" };
+/** Status turunan jaminan: aktif yang tinggal ≤ 30 hari / sudah lewat masa berlaku. */
+export function guaranteeState(g: { status: string; expiryDate: string }) {
+  if (g.status !== "Active") return g.status;
+  if (g.expiryDate < today()) return "Expired";
+  return daysBetween(today(), g.expiryDate) <= 30 ? "Expiring" : "Active";
+}
+
+/** Nilai komisi agen (valuta SO) dari DPP Sales Order. */
+export const commissionAmount = (so: { subtotal: number; commissionPercent: number | null; currency?: string }) =>
+  roundMoney(so.subtotal * (so.commissionPercent || 0) / 100, so.currency);
+/** Status komisi: Accrued (SO berjalan) → Payable (SO lunas) → Paid. */
+export function commissionState(so: { commissionPercent: number | null; commissionPaidAt: string | null; status: string; fullyPaid: boolean }) {
+  if (!so.commissionPercent) return null;
+  if (so.commissionPaidAt) return "Paid";
+  if (so.status === "Cancelled") return "Cancelled";
+  return so.fullyPaid ? "Payable" : "Accrued";
+}
+export const COMMISSION_LABEL: Record<string, string> = { Accrued: "Berjalan", Payable: "Siap dibayar", Paid: "Dibayar", Cancelled: "Batal" };
+
+/** TKDN gabungan penawaran: rata-rata TKDN produk dibobot nilai item (jasa/produk tanpa TKDN dihitung 0). */
+export function weightedTkdn(items: { lineTotal: number; tkdn: number | null }[]) {
+  const total = items.reduce((t, i) => t + i.lineTotal, 0);
+  if (!total) return null;
+  return Math.round(items.reduce((t, i) => t + i.lineTotal * (i.tkdn || 0), 0) / total * 100) / 100;
+}
+
+export const MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];

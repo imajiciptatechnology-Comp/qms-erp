@@ -9,7 +9,7 @@ import { saveProduct, type ProductInput } from "../actions";
 import { rupiah } from "../lib";
 import { ErrorNote, btnPrimary, btnSecondary, inputCls, labelCls, useAction } from "../ui";
 
-type P = Omit<ProductInput, "model" | "specs" | "hsCode"> & { hsCode: string | null; id: string; model: string | null; specs: string | null; leadTimeWeeks: number | null; calibrationIntervalMonths: number | null };
+type P = Omit<ProductInput, "model" | "specs" | "hsCode" | "tkdnPercent" | "tkdnCertNo"> & { hsCode: string | null; tkdnPercent: number | null; tkdnCertNo: string | null; id: string; model: string | null; specs: string | null; leadTimeWeeks: number | null; calibrationIntervalMonths: number | null };
 
 export default function ProductList({ products, canManage }: { products: P[]; canManage: boolean }) {
   const [q, setQ] = useState("");
@@ -40,7 +40,7 @@ export default function ProductList({ products, canManage }: { products: P[]; ca
             <tbody className="divide-y divide-slate-100">
               {filtered.length ? filtered.map(p => (
                 <tr key={p.id} className={p.isActive ? "" : "opacity-60"}>
-                  <td className="px-6 py-4"><p className="font-semibold text-slate-800">{p.name}</p><p className="text-xs text-slate-500">{p.sku} · {p.brand}{p.model ? ` ${p.model}` : ""}{p.hsCode ? ` · HS ${p.hsCode}` : ""}{!p.isActive && " · nonaktif"}</p></td>
+                  <td className="px-6 py-4"><p className="font-semibold text-slate-800">{p.name}</p><p className="text-xs text-slate-500">{p.sku} · {p.brand}{p.model ? ` ${p.model}` : ""}{p.hsCode ? ` · HS ${p.hsCode}` : ""}{p.tkdnPercent != null ? ` · TKDN ${p.tkdnPercent}%` : ""}{!p.isActive && " · nonaktif"}</p></td>
                   <td className="px-6 py-4">{p.category}</td>
                   <td className="px-6 py-4 text-right font-semibold text-slate-800 tabular-nums whitespace-nowrap">{rupiah(p.price)}<span className="block text-xs font-normal text-slate-500">/ {p.unit}</span></td>
                   <td className="px-6 py-4">{p.availability === "Indent" ? <span className="text-amber-700">Indent {p.leadTimeWeeks ? `${p.leadTimeWeeks} mgg` : ""}</span> : <span className="text-emerald-700">Ready</span>}</td>
@@ -64,7 +64,7 @@ export default function ProductList({ products, canManage }: { products: P[]; ca
               sku: String(f.get("sku")), name: String(f.get("name")), category: String(f.get("category")), brand: String(f.get("brand")), model: String(f.get("model") || "") || undefined,
               unit: String(f.get("unit") || "Unit"), price: Number(f.get("price")), availability: String(f.get("availability")), leadTimeWeeks: num("leadTimeWeeks"),
               warrantyMonths: Number(f.get("warrantyMonths")) || 0, requiresCalibration: f.get("requiresCalibration") === "on", calibrationIntervalMonths: num("calibrationIntervalMonths"),
-              specs: String(f.get("specs") || "") || undefined, isActive: f.get("isActive") === "on", hsCode: String(f.get("hsCode") || "") || null,
+              specs: String(f.get("specs") || "") || undefined, isActive: f.get("isActive") === "on", hsCode: String(f.get("hsCode") || "") || null, tkdnPercent: num("tkdnPercent"), tkdnCertNo: String(f.get("tkdnCertNo") || "") || null,
             }), () => setEditing(null));
           }}>
             <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -78,6 +78,8 @@ export default function ProductList({ products, canManage }: { products: P[]; ca
               <div><label className={labelCls} htmlFor="pr-brand">Merek</label><input id="pr-brand" name="brand" required defaultValue={editing.brand} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="pr-model">Model</label><input id="pr-model" name="model" defaultValue={editing.model ?? ""} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="pr-hs">Kode HS (ekspor)</label><input id="pr-hs" name="hsCode" placeholder="9023.00.00" defaultValue={editing.hsCode ?? ""} className={inputCls} /></div>
+              <div><label className={labelCls} htmlFor="pr-tkdn">TKDN (%)</label><input id="pr-tkdn" name="tkdnPercent" type="number" min={0} max={100} step={0.01} defaultValue={editing.tkdnPercent ?? ""} className={inputCls} /></div>
+              <div className="col-span-2 sm:col-span-3"><label className={labelCls} htmlFor="pr-tkdn-no">No. sertifikat TKDN</label><input id="pr-tkdn-no" name="tkdnCertNo" defaultValue={editing.tkdnCertNo ?? ""} className={inputCls} /></div>
               <div className="col-span-2"><label className={labelCls} htmlFor="pr-price">Harga (Rp, belum PPN)</label><input id="pr-price" name="price" type="number" min={0} step={1000} required defaultValue={editing.price} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="pr-unit">Satuan</label><input id="pr-unit" name="unit" defaultValue={editing.unit} className={inputCls} /></div>
               <div><label className={labelCls} htmlFor="pr-war">Garansi (bln)</label><input id="pr-war" name="warrantyMonths" type="number" min={0} defaultValue={editing.warrantyMonths} className={inputCls} /></div>

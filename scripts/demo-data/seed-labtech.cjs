@@ -7,6 +7,9 @@
  * Ekspor: customer luar negeri (Jordan, Kenya) bertransaksi dalam USD (PPN 0%, kurs dicatat di dokumen),
  * order F memakai L/C dengan batas pengiriman yang sudah dekat, produk trainer punya kode HS.
  *
+ * Prioritas 2: checklist & syarat TKDN tender, jaminan penawaran/pelaksanaan, agen per negara + komisi, target bulanan.
+ * Angka TKDN & nomor sertifikat DUMMY.
+ *
  * AMAN dijalankan berulang: semua record pakai id "DEMO-LT-…" dan di-upsert; data lain (termasuk data
  * test user) tidak dihapus. Produk demo lama (alat laboratorium, id DEMO-PRD-LPI-…) hanya dinonaktifkan.
  *
@@ -126,21 +129,35 @@ async function seedLabtech() {
   // Produk lama (alat laboratorium) dinonaktifkan, tidak dihapus.
   const off = await prisma.product.updateMany({ where: { id: { startsWith: "DEMO-PRD-LPI-" } }, data: { isActive: false } });
   for (const p of PRODUCTS) {
-    const data = { sku: p.sku, name: p.name, category: p.category, brand: "Labtech", model: p.model, unit: p.unit || "Unit", price: p.price, availability: p.category === "Jasa" ? "Ready" : "Indent", leadTimeWeeks: p.leadTimeWeeks ?? null, warrantyMonths: p.warrantyMonths ?? 12, requiresCalibration: false, specs: p.specs, isActive: true, hsCode: p.category === "Jasa" ? null : HS_TRAINER };
+    const data = { sku: p.sku, name: p.name, category: p.category, brand: "Labtech", model: p.model, unit: p.unit || "Unit", price: p.price, availability: p.category === "Jasa" ? "Ready" : "Indent", leadTimeWeeks: p.leadTimeWeeks ?? null, warrantyMonths: p.warrantyMonths ?? 12, requiresCalibration: false, specs: p.specs, isActive: true, hsCode: p.category === "Jasa" ? null : HS_TRAINER,
+      // TKDN dummy 38–52% untuk trainer buatan Batam; jasa tanpa sertifikat.
+      tkdnPercent: p.category === "Jasa" ? null : 38 + (p.sku.charCodeAt(p.sku.length - 2) % 15), tkdnCertNo: p.category === "Jasa" ? null : `TKDN-DUMMY-${p.sku}` };
     await prisma.product.upsert({ where: { id: prodId(p.sku) }, update: data, create: { id: prodId(p.sku), ...data, createdAt: day(-400) } });
   }
 
+  const AGENTS = [
+    { id: `${P}AGT-EA`, agentNo: "AGT-LT-001", name: "East Africa EduTech Ltd", countries: "Kenya, Tanzania, Uganda", contactName: "Ms. Grace Wanjiru", email: "grace@ea-edutech.example", phone: "+254-20-555-0199", commissionPercent: 7, notes: "Perjanjian keagenan non-eksklusif 2026–2028 (dummy)." },
+    { id: `${P}AGT-LV`, agentNo: "AGT-LT-002", name: "Levant Technical Supplies", countries: "Jordan, Iraq, Lebanon", contactName: "Mr. Omar Saleh", email: "omar@levant-ts.example", phone: "+962-6-555-0177", commissionPercent: 5, notes: null },
+  ];
+  for (const a of AGENTS) {
+    const { id, ...data } = a;
+    await prisma.agent.upsert({ where: { id }, update: data, create: { id, ...data, status: "Active", createdAt: day(-200) } });
+  }
+  const AGENT_OF = { KEN: `${P}AGT-EA`, ANC: `${P}AGT-LV` };
+
   for (const [i, c] of CUSTOMERS.entries()) {
     const { key, ...rest } = c;
-    const data = { country: "Indonesia", currency: "IDR", ...rest };
+    const data = { country: "Indonesia", currency: "IDR", agentId: AGENT_OF[key] ?? null, ...rest };
     await prisma.customer.upsert({ where: { id: custId(key) }, update: data, create: { id: custId(key), customerNo: `CUS-LT-${String(i + 1).padStart(3, "0")}`, ...data, createdAt: day(-300), historyJson: hist([300, SALES, "Customer didaftarkan"]) } });
   }
 
   // Opportunity tender + penawaran menunggu persetujuan diskon
   const opps = [
-    { id: `${P}OPP-1`, opportunityNo: "OPP-LT-001", title: "Pengadaan trainer HVAC & otomotif — revitalisasi SMK", customerId: custId("SMK"), stage: "Qualified", source: "Tender LPSE", estimatedValue: 1850000000, probability: 25, expectedCloseDate: day(45), tenderNo: "LPSE-MDL-2026-0142", tenderDeadline: day(12) },
-    { id: `${P}OPP-2`, opportunityNo: "OPP-LT-002", title: "Laboratorium energi terbarukan — tahap 2", customerId: custId("UTM"), stage: "Negotiation", source: "Repeat Order", estimatedValue: 720000000, probability: 60, expectedCloseDate: day(20), tenderNo: null, tenderDeadline: null },
-    { id: `${P}OPP-3`, opportunityNo: "OPP-LT-003", title: "Biomedical technician training lab", customerId: custId("ANC"), stage: "Quotation", source: "Tender UN / Donor", estimatedValue: 1100000000, probability: 40, expectedCloseDate: day(60), tenderNo: "UNGM-RFP-26-8812", tenderDeadline: day(25) },
+    { id: `${P}OPP-1`, opportunityNo: "OPP-LT-001", title: "Pengadaan trainer HVAC & otomotif — revitalisasi SMK", customerId: custId("SMK"), stage: "Qualified", source: "Tender LPSE", estimatedValue: 1850000000, probability: 25, expectedCloseDate: day(45), tenderNo: "LPSE-MDL-2026-0142", tenderDeadline: day(6), tkdnRequired: 40,
+      tenderChecklistJson: JSON.stringify(["Dokumen kualifikasi (NIB, NPWP, akta, SBU/KBLI)", "Surat penawaran bermeterai", "Daftar kuantitas & harga", "Spesifikasi teknis & brosur", "Sertifikat TKDN produk", "Jaminan penawaran", "Surat dukungan / pernyataan pabrikan", "Sertifikat ISO 9001", "Daftar pengalaman pekerjaan sejenis", "Pakta integritas"].map((name, i) => ({ name, done: [0, 3, 4, 5, 7].includes(i) }))) },
+    { id: `${P}OPP-2`, opportunityNo: "OPP-LT-002", title: "Laboratorium energi terbarukan — tahap 2", customerId: custId("UTM"), stage: "Negotiation", source: "Repeat Order", estimatedValue: 720000000, probability: 60, expectedCloseDate: day(20), tenderNo: null, tenderDeadline: null, tkdnRequired: null, tenderChecklistJson: "[]" },
+    { id: `${P}OPP-3`, opportunityNo: "OPP-LT-003", title: "Biomedical technician training lab", customerId: custId("ANC"), stage: "Quotation", source: "Tender UN / Donor", estimatedValue: 1100000000, probability: 40, expectedCloseDate: day(60), tenderNo: "UNGM-RFP-26-8812", tenderDeadline: day(25), tkdnRequired: null,
+      tenderChecklistJson: JSON.stringify(["Company registration & profile", "UNGM / vendor registration", "Technical proposal & compliance matrix", "Financial proposal (price schedule)", "Brochures & technical specifications", "ISO 9001 certificate", "Manufacturer's authorization / origin statement", "Past performance references", "Bid security (bid bond)", "Signed bid form & declarations"].map((name, i) => ({ name, done: i < 6 }))) },
   ];
   for (const o of opps) {
     const data = { ...o, salesName: SALES, notes: null, lostReason: null };
@@ -179,6 +196,8 @@ async function seedLabtech() {
       currency: o.currency ?? "IDR", exchangeRate: rate, taxPercent: tax,
       lcNo: null, lcIssuingBank: null, lcIssueDate: null, lcLatestShipment: null, lcExpiryDate: null, lcAmount: null, lcNotes: null,
       ...(o.lc ? { ...o.lc, lcAmount: t.total } : {}),
+      agentId: AGENT_OF[o.cust] ?? null, commissionPercent: AGENT_OF[o.cust] ? (o.cust === "KEN" ? 7 : 5) : null,
+      commissionPaidAt: o.key === "D" ? day(-20) : null, commissionPaidRef: o.key === "D" ? "TT-LEVANT-2610-01" : null,
     };
     await prisma.salesOrder.upsert({ where: { id: soId(o.key) }, update: data, create: { id: soId(o.key), ...data, createdAt: o.orderDate, historyJson: hist([40, SALES, `Dibuat dari PO ${data.customerPoNo}`], [38, MGR, "Status: Contract Review → Confirmed"]) } });
     await prisma.salesOrderItem.deleteMany({ where: { salesOrderId: soId(o.key) } });
@@ -199,6 +218,25 @@ async function seedLabtech() {
       if (paidAmount > 0) {
         await prisma.payment.create({ data: { id: `${P}PAY-${o.key}-${ti}`, invoiceId: invId, paymentDate: day(ti === 0 ? -30 : -4), amount: paidAmount, method: o.sched === SCHED_LC ? "L/C" : "Transfer", reference: o.lc ? `L/C No. ${o.lc.lcNo} (${o.lc.lcIssuingBank})` : `TRF-${o.cust}-${ti + 1}`, receivedBy: FIN, createdAt: day(-4), receiptNo: no("KWT", o.seq * 10 + ti - 8000) } });
       }
+    }
+  }
+
+  // Jaminan (dummy)
+  const GUARANTEES = [
+    { id: `${P}GRT-1`, guaranteeNo: "BG/BTM/2026/0712", type: "Jaminan Penawaran", issuer: "Bank Contoh Cabang Batam", amount: 37000000, currency: "IDR", issueDate: day(-10), expiryDate: day(20), customerId: custId("SMK"), opportunityId: `${P}OPP-1`, salesOrderId: null, notes: "2% dari HPS paket LPSE-MDL-2026-0142." },
+    { id: `${P}GRT-2`, guaranteeNo: "SB/ASR/2026/1188", type: "Jaminan Pelaksanaan", issuer: "PT Asuransi Contoh (surety bond)", amount: 34600000, currency: "IDR", issueDate: day(-18), expiryDate: day(150), customerId: custId("UTM"), opportunityId: null, salesOrderId: soId("A"), notes: "5% nilai kontrak, berlaku sampai serah terima." },
+    { id: `${P}GRT-3`, guaranteeNo: "BB-USD-26-0042", type: "Jaminan Penawaran", issuer: "Bank Contoh Cabang Batam", amount: 2500, currency: "USD", issueDate: day(-5), expiryDate: day(85), customerId: custId("ANC"), opportunityId: `${P}OPP-3`, salesOrderId: null, notes: "Bid security sesuai RFP UNGM-RFP-26-8812." },
+  ];
+  for (const g of GUARANTEES) {
+    const { id, ...data } = g;
+    await prisma.guarantee.upsert({ where: { id }, update: data, create: { id, ...data, status: "Active", createdBy: FIN, createdAt: g.issueDate, historyJson: hist([5, FIN, `${g.type} dicatat`]) } });
+  }
+
+  // Target bulanan tahun berjalan (Rupiah)
+  const year = Number(day(0).slice(0, 4));
+  for (let m = 1; m <= 12; m++) {
+    for (const [salesName, amount] of [["", 900000000], [SALES, 600000000]]) {
+      await prisma.salesTarget.upsert({ where: { year_month_salesName: { year, month: m, salesName } }, update: { amount }, create: { year, month: m, salesName, amount, updatedBy: MGR, updatedAt: day(-60) } });
     }
   }
 

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { Factory, FileSignature, Lock, Ship } from "lucide-react";
+import { Factory, FileSignature, Lock, Plus, Ship } from "lucide-react";
 import { getSalesAccess } from "@/app/modules/sales/access";
 import { PRODUCTION_LABEL, SHIPMENT_STATUS_LABEL, canSeeShipping, contractState, money } from "@/app/modules/sales/lib";
-import { Card, StatCard, StatusBadge } from "@/app/modules/sales/ui";
+import { Card, StatCard, StatusBadge, btnPrimarySm, btnSecondarySm } from "@/app/modules/sales/ui";
 import { getShippingOverview } from "./actions";
 
 export default async function ContractShippingOverview() {
@@ -40,13 +40,13 @@ export default async function ContractShippingOverview() {
           ) : <p className="text-sm text-slate-500">Tidak ada order yang tertahan.</p>}
         </Card>
 
-        <Card title="Siap dibuatkan shipment" actions={<Link href="/modules/contract-shipping/shipments/new" className="text-sm text-blue-600 hover:underline">Shipment baru</Link>}>
+        <Card title="Siap dibuatkan shipment" actions={access.canShipping ? <Link href="/modules/contract-shipping/shipments/new" className={btnSecondarySm}><Plus className="w-3.5 h-3.5" aria-hidden /> Shipment baru</Link> : undefined}>
           {readyPaid.length ? (
             <ul className="divide-y divide-slate-100">
               {readyPaid.map(o => (
                 <li key={o.id} className="py-2.5 flex items-center justify-between gap-4 text-sm">
                   <span><span className="font-semibold text-slate-800">{o.soNo}</span><span className="block text-xs text-slate-500">{o.customer.name} · {o.customer.city ?? "-"}</span></span>
-                  <Link href={`/modules/contract-shipping/shipments/new?so=${o.id}`} className="text-blue-700 text-sm font-medium hover:underline">Buat shipment</Link>
+                  {access.canShipping && <Link href={`/modules/contract-shipping/shipments/new?so=${o.id}`} className={btnPrimarySm}><Ship className="w-3.5 h-3.5" aria-hidden /> Buat shipment</Link>}
                 </li>
               ))}
             </ul>
