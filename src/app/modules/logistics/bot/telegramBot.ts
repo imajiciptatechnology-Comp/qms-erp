@@ -641,6 +641,12 @@ async function handlePhoto(c: NonNullable<Ctx>, chatId: string, m: TgMessage) {
     return reply(chatId, ctx, `📷 ${label} diterima. ${a.summary}${tail}`);
   } catch (err) {
     console.error("[bot] photo", err);
+    // AI gagal/sibuk: foto tetap masuk kronologi trip. Saat bongkar (atau caption ePOD/SJ) dianggap SJ bertanda tangan.
+    if (fileUrl && c.trip) {
+      const isPod = c.trip.status === "Unloading" || /e-?pod|surat jalan|\bsj\b|ttd|tanda tangan/i.test(m.caption ?? "");
+      await prisma.tripEvent.create({ data: { tripId: c.trip.id, status: "Photo", label: isPod ? "Surat jalan bertanda tangan (ePOD) — belum dibaca AI" : "Foto (belum dibaca AI)", at: nowIso(), lat: c.trip.lastLat, lng: c.trip.lastLng, note: fileUrl, source: "Telegram", by: c.driver.name } }).catch(() => {});
+      if (isPod) return reply(chatId, ctx, "📷 Surat jalan bertanda tangan (ePOD) disimpan. Jangan lupa tekan tombol ✅ Selesai bongkar.");
+    }
     return reply(chatId, ctx, fileUrl ? "📷 Foto disimpan, tapi belum bisa dibaca otomatis. Terima kasih, Pak." : "Maaf, foto gagal diterima. Coba kirim ulang.");
   }
 }
