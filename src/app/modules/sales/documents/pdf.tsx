@@ -129,6 +129,23 @@ function BlockView({ b }: { b: Block }) {
       return <Text style={s.noteBox}>{b.text}</Text>;
     case "signatures":
       return <View style={s.signRow} wrap={false}>{b.items.map((sig, i) => <SignatureView key={i} sig={sig} />)}</View>;
+    case "images":
+      return (
+        <View>
+          {b.title && <Text style={s.heading}>{b.title}</Text>}
+          {b.items.map((img, i) => {
+            // Lebar konten A4 ±483pt; tinggi maks. 300pt supaya dua foto muat satu halaman.
+            const w = Math.min(483, (img.width / img.height) * 300);
+            return (
+              <View key={i} wrap={false} style={{ marginTop: 8, marginBottom: 4 }}>
+                {/* eslint-disable-next-line jsx-a11y/alt-text -- Image react-pdf, bukan <img> HTML */}
+                <Image src={{ data: img.data, format: img.format }} style={{ width: w, height: (w * img.height) / img.width, borderWidth: 0.5, borderColor: C.line }} />
+                <Text style={{ fontSize: 7.5, color: C.muted, marginTop: 3 }}>{img.caption}</Text>
+              </View>
+            );
+          })}
+        </View>
+      );
   }
 }
 

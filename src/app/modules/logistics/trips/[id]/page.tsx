@@ -119,7 +119,13 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
                   <span className="absolute -left-1.5 w-3 h-3 rounded-full border-2 border-white" style={{ background: TRIP_STATUSES[e.status]?.color ?? "#94a3b8" }} />
                   {e.label} <span className="text-xs text-slate-500">· {fmt(e.at)} · {e.source}{e.by ? ` · ${e.by}` : ""}</span>
                   {e.note && !e.note.startsWith("http") && <span className="block text-xs text-slate-500">{e.note}</span>}
-                  {e.note?.startsWith("http") && <a href={e.note} target="_blank" rel="noreferrer" className="block text-xs text-blue-700 hover:underline">Lihat foto</a>}
+                  {e.note?.startsWith("http") && (
+                    <a href={e.note} target="_blank" rel="noreferrer" className="mt-1.5 block w-fit group" title="Buka foto ukuran penuh">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- foto dari storage, ukuran tidak diketahui */}
+                      <img src={e.note} alt={e.label} loading="lazy" className="h-32 max-w-[16rem] rounded-lg border border-slate-200 object-cover bg-slate-50 group-hover:ring-2 group-hover:ring-blue-300" />
+                      <span className="text-xs text-blue-700 group-hover:underline">Lihat foto</span>
+                    </a>
+                  )}
                 </li>
               ))}
             </ol>

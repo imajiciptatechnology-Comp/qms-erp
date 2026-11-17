@@ -17,7 +17,11 @@ export type Block =
   | { type: "clauses"; items: { title: string; body: string }[] }
   | { type: "note"; text: string }
   /** Blok tanda tangan di tengah dokumen (mis. perjanjian: sebelum lampiran). */
-  | { type: "signatures"; items: Signature[] };
+  | { type: "signatures"; items: Signature[] }
+  /** Foto lampiran (mis. ePOD). data = bytes JPG/PNG; width/height dalam piksel asli (untuk rasio). */
+  | { type: "images"; title?: string; items: DocImage[] };
+
+export type DocImage = { data: Buffer; format: "jpg" | "png"; width: number; height: number; caption: string };
 
 export type Signature = { lead: string; org?: string; name: string; title: string; extra?: string; stamp?: boolean };
 

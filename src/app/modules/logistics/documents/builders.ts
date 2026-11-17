@@ -1,6 +1,6 @@
 // Dokumen ber-kop PT Arunika Trans Nusantara (kop dari CompanyProfile), memakai engine dokumen Sales.
 import { prisma } from "@/lib/prisma";
-import type { DocModel } from "@/app/modules/sales/documents/model";
+import type { DocImage, DocModel } from "@/app/modules/sales/documents/model";
 import { safeName, tanggal, terbilangRupiah } from "@/app/modules/sales/documents/format";
 import { getLogisticsBrand } from "../server";
 import { rupiah, type PriceLine } from "../lib";
@@ -124,6 +124,34 @@ const jam = (iso?: string | null) => iso ? new Date(iso).toLocaleString("id-ID",
 const plain = (s?: string | null) => (s ?? "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "").replace(/\s{2,}/g, " ").trim();
 const docDate = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
 
+/** Ukuran gambar dari header JPG/PNG (tanpa library). null = format lain/rusak. */
+function imageSize(b: Buffer): { format: "jpg" | "png"; width: number; height: number } | null {
+  if (b.length > 24 && b.readUInt32BE(0) === 0x89504e47) return { format: "png", width: b.readUInt32BE(16), height: b.readUInt32BE(20) };
+  if (b.length > 4 && b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const marker = b[i + 1];
+      // SOF0..SOF15 kecuali DHT(C4), JPG(C8), DAC(CC): berisi tinggi & lebar.
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { format: "jpg", width: b.readUInt16BE(i + 7), height: b.readUInt16BE(i + 5) };
+      i += 2 + b.readUInt16BE(i + 2);
+    }
+  }
+  return null;
+}
+
+/** Unduh foto (mis. ePOD dari storage) untuk dilampirkan di dokumen; gagal/format lain → dilewati. */
+async function loadDocImage(url: string, caption: string): Promise<DocImage | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = Buffer.from(await res.arrayBuffer());
+    if (data.length > 6_000_000) return null;
+    const size = imageSize(data);
+    return size && size.width > 0 && size.height > 0 ? { data, ...size, caption } : null;
+  } catch { return null; }
+}
+
 /** Laporan P2H (pemeriksaan harian) per pemeriksaan: hasil tiap item, keputusan layak/tidak layak jalan, tindak lanjut. */
 async function p2hReport(id: string): Promise<DocModel | null> {
   const c = await prisma.preTripCheck.findUnique({ where: { id }, include: { vehicle: { include: { truckType: true } }, trip: { include: { driver: true, client: true, route: true } } } });
@@ -196,6 +224,14 @@ async function tripReport(id: string): Promise<DocModel | null> {
   const hours = t.startedAt && t.completedAt ? (new Date(t.completedAt).getTime() - new Date(t.startedAt).getTime()) / 3_600_000 : null;
   const late = t.promisedArrival && unload[0] ? new Date(unload[0].at) > new Date(t.promisedArrival) : null;
   const ops = signers.find(s => s.key === "ops") ?? signers.find(s => s.key === "fleet");
+  // Lampiran foto ePOD: tiap foto dipasangkan ke titik bongkar yang sedang dikerjakan saat foto dikirim.
+  const stopName = (at: string) => {
+    const k = unload.filter(u => u.at <= at).length;
+    const s = o?.stops[k - 1];
+    return k > 0 ? `Titik bongkar ${k}${s ? `: ${s.name}` : ""}` : "Sebelum bongkar";
+  };
+  const podImages = (await Promise.all(pods.filter(p => p.note?.startsWith("http")).slice(0, 8)
+    .map(p => loadDocImage(p.note!, `${stopName(p.at)} · dikirim ${p.by ?? "sopir"} ${jam(p.at)}`)))).filter((x): x is DocImage => x != null);
   return {
     brand,
     fileName: safeName(`Laporan Trip ${t.tripNo} ${t.vehicle.plateNo}`),
@@ -226,10 +262,12 @@ async function tripReport(id: string): Promise<DocModel | null> {
         ["Foto lain", `${Math.max(0, photos.length - pods.length)} foto (muatan/segel/nota) tersimpan di sistem`],
       ] },
       { type: "note", text: done ? "Trip telah selesai. Laporan ini menjadi lampiran penagihan (invoice) kepada klien." : "Trip belum selesai — laporan sementara." },
-    ],
-    signatures: [
-      { lead: "Pengemudi,", name: t.driver.name, title: `Sopir · ${t.vehicle.plateNo}` },
-      { lead: "Diverifikasi oleh,", org: brand.company, name: ops?.name ?? "(.................................)", title: ops?.title ?? "Operasional" },
+      // Tanda tangan sebelum lampiran, supaya foto ePOD berada di halaman lampiran sesudahnya.
+      { type: "signatures", items: [
+        { lead: "Pengemudi,", name: t.driver.name, title: `Sopir · ${t.vehicle.plateNo}` },
+        { lead: "Diverifikasi oleh,", org: brand.company, name: ops?.name ?? "(.................................)", title: ops?.title ?? "Operasional" },
+      ] },
+      ...(podImages.length ? [{ type: "images" as const, title: `Lampiran — foto Surat Jalan bertanda tangan penerima (ePOD), ${podImages.length} foto`, items: podImages }] : []),
     ],
   };
 }

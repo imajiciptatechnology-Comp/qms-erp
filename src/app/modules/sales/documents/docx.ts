@@ -145,6 +145,17 @@ function blockToDocx(b: Block): (Paragraph | Table)[] {
         border: { top: thin(), bottom: thin(), left: thin(), right: thin() },
         spacing: { before: 160, after: 160 },
       })];
+    case "images":
+      return [
+        ...(b.title ? [para([run(b.title, { bold: true, color: C.primary, size: 19 })], { before: 160, after: 60 })] : []),
+        ...b.items.flatMap(img => {
+          const w = Math.min(600, (img.width / img.height) * 380); // piksel docx (96 dpi)
+          return [
+            new Paragraph({ children: [new ImageRun({ type: img.format, data: img.data, transformation: { width: Math.round(w), height: Math.round((w * img.height) / img.width) } })], spacing: { before: 120, after: 40 } }),
+            para([run(img.caption, { size: 15, color: C.muted })], { after: 120 }),
+          ];
+        }),
+      ];
   }
 }
 
