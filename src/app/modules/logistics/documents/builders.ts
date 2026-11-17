@@ -4,8 +4,10 @@ import type { DocModel } from "@/app/modules/sales/documents/model";
 import { safeName, tanggal, terbilangRupiah } from "@/app/modules/sales/documents/format";
 import { getLogisticsBrand } from "../server";
 import { rupiah, type PriceLine } from "../lib";
+import { P2H_ITEMS, parseP2HRecord } from "../p2hLib";
+import { TRIP_STATUSES } from "../trackingLib";
 
-export const LOG_DOC_KINDS = ["charter-quote", "surat-jalan"] as const;
+export const LOG_DOC_KINDS = ["charter-quote", "surat-jalan", "p2h", "trip-report", "invoice"] as const;
 export type LogDocKind = (typeof LOG_DOC_KINDS)[number];
 
 /** Penawaran tarif charter (status Draft) / Konfirmasi order charter (Confirmed dst.). */
@@ -117,9 +119,168 @@ async function suratJalan(id: string): Promise<DocModel | null> {
   };
 }
 
+/** Tanggal + jam WIB, tanpa emoji (font PDF tidak punya glyph emoji). */
+const jam = (iso?: string | null) => iso ? new Date(iso).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" }) + " WIB" : "-";
+const plain = (s?: string | null) => (s ?? "").replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, "").replace(/\s{2,}/g, " ").trim();
+const docDate = (iso: string) => new Date(iso).toLocaleDateString("sv-SE", { timeZone: "Asia/Jakarta" });
+
+/** Laporan P2H (pemeriksaan harian) per pemeriksaan: hasil tiap item, keputusan layak/tidak layak jalan, tindak lanjut. */
+async function p2hReport(id: string): Promise<DocModel | null> {
+  const c = await prisma.preTripCheck.findUnique({ where: { id }, include: { vehicle: { include: { truckType: true } }, trip: { include: { driver: true, client: true, route: true } } } });
+  if (!c) return null;
+  const { brand, city, signers } = await getLogisticsBrand();
+  const driver = c.trip?.driver ?? (c.driverId ? await prisma.driver.findUnique({ where: { id: c.driverId } }) : null);
+  const rec = parseP2HRecord(c.resultJson);
+  const items = P2H_ITEMS.filter(i => rec.items[i.key] != null);
+  const failed = Boolean(c.criticalFails);
+  const needsOverride = !failed && Boolean(c.otherFails);
+  const verdict = failed ? "TIDAK LAYAK JALAN" : needsOverride ? "LAYAK BERSYARAT (perlu override Fleet Manager)" : "LAYAK JALAN";
+  const fleet = signers.find(s => s.key === "fleet");
+  const no = `P2H/${c.vehicle.plateNo.replace(/\s+/g, "")}/${docDate(c.at).replace(/-/g, "")}/${c.id.slice(-4).toUpperCase()}`;
+  return {
+    brand,
+    fileName: safeName(`Laporan P2H ${c.vehicle.plateNo} ${docDate(c.at)}${failed ? " GAGAL" : ""}`),
+    title: "LAPORAN PEMERIKSAAN HARIAN KENDARAAN (P2H)",
+    number: no,
+    watermark: failed ? "GAGAL" : undefined,
+    meta: [["Tanggal", `${city}, ${tanggal(docDate(c.at))}`], ["Waktu periksa", jam(c.at)], ["No. trip", c.trip?.tripNo ?? "-"], ["Sumber", c.source]],
+    blocks: [
+      { type: "kv", title: "Kendaraan & pemeriksa", rows: [
+        ["Kendaraan", `${c.vehicle.plateNo} · ${c.vehicle.truckType.name} · ${c.vehicle.brand ?? ""}`],
+        ["Odometer", rec.odometerKm != null ? `${rec.odometerKm.toLocaleString("id-ID")} km` : "-"],
+        ["Pengemudi", driver ? `${driver.name} (${driver.code})` : "-"],
+        ["Tugas", c.trip ? `${c.trip.client?.name ?? "-"} · ${c.trip.route ? `${c.trip.route.origin} → ${c.trip.route.destination}` : "-"}` : "-"],
+      ] },
+      { type: "table", columns: [{ label: "No", width: 0.5, align: "center" }, { label: "Item pemeriksaan", width: 3.2 }, { label: "Kategori", width: 1.1, align: "center" }, { label: "Hasil", width: 1.1, align: "center" }, { label: "Keterangan", width: 3 }],
+        rows: items.map((i, n) => {
+          const m = rec.items[i.key]; const d = rec.details[i.key];
+          const note = [plain(d?.note), d?.photos?.length ? `${d.photos.length} foto bukti (tersimpan di sistem)` : ""].filter(Boolean).join(" · ");
+          return [String(n + 1), { text: i.label, sub: i.hint }, i.critical ? "Kritis" : "Umum", { text: m === "ok" ? "Baik" : m === "fail" ? "TIDAK BAIK" : "-", bold: m === "fail" }, note || "-"];
+        }) },
+      { type: "kv", title: "Keputusan", rows: [
+        ["Status kendaraan", verdict],
+        ...(c.criticalFails ? [["Item kritis gagal", c.criticalFails] as [string, string]] : []),
+        ...(c.otherFails ? [["Item umum gagal", c.otherFails] as [string, string]] : []),
+        ...(c.notes ? [["Catatan", plain(c.notes)] as [string, string]] : []),
+      ] },
+      failed
+        ? { type: "note", text: "Kendaraan DILARANG BERANGKAT. Surat Jalan tidak diterbitkan sampai kerusakan diperbaiki dan P2H ulang dinyatakan lolos. Dispatcher wajib mengganti armada atau menjadwal ulang, dan Fleet/Workshop menindaklanjuti perbaikan." }
+        : needsOverride
+          ? { type: "note", text: "Item non-kritis bermasalah: kendaraan boleh berangkat setelah override Fleet Manager dicatat di sistem. Perbaikan dijadwalkan otomatis sesudah trip selesai." }
+          : { type: "note", text: "Seluruh item kritis dalam kondisi baik. Kendaraan layak jalan dan Surat Jalan dapat diterbitkan." },
+    ],
+    signatures: [
+      { lead: "Diperiksa oleh,", name: driver?.name ?? "(.................................)", title: "Pengemudi" },
+      { lead: "Diketahui,", org: brand.company, name: fleet?.name ?? "(.................................)", title: fleet?.title ?? "Fleet Manager" },
+    ],
+  };
+}
+
+/** Laporan perjalanan & bukti pengiriman (ePOD): kronologi trip dari P2H sampai selesai. */
+async function tripReport(id: string): Promise<DocModel | null> {
+  const t = await prisma.trip.findUnique({ where: { id }, include: {
+    vehicle: { include: { truckType: true } }, driver: true, helper: true, route: true, client: true,
+    order: { include: { stops: { orderBy: { seq: "asc" } } } }, events: { orderBy: { at: "asc" } }, preTripChecks: { orderBy: { at: "asc" } },
+  } });
+  if (!t) return null;
+  const { brand, city, signers } = await getLogisticsBrand();
+  const o = t.order;
+  const ev = t.events;
+  const unload = ev.filter(e => e.status === "Unloading");
+  // Selesai bongkar di titik k = kejadian pertama sesudah "tiba bongkar" ke-k yang meninggalkan titik itu.
+  const leftStop = unload.map(u => ev.find(e => e.at > u.at && ["InTransit", "Returning", "Completed"].includes(e.status)));
+  const pods = ev.filter(e => e.status === "Photo" && /ePOD|bertanda tangan/i.test(e.label));
+  const photos = ev.filter(e => e.status === "Photo");
+  const handover = ev.find(e => e.status === "SJHandover");
+  const done = t.status === "Completed";
+  const hours = t.startedAt && t.completedAt ? (new Date(t.completedAt).getTime() - new Date(t.startedAt).getTime()) / 3_600_000 : null;
+  const late = t.promisedArrival && unload[0] ? new Date(unload[0].at) > new Date(t.promisedArrival) : null;
+  const ops = signers.find(s => s.key === "ops") ?? signers.find(s => s.key === "fleet");
+  return {
+    brand,
+    fileName: safeName(`Laporan Trip ${t.tripNo} ${t.vehicle.plateNo}`),
+    title: "LAPORAN PERJALANAN & BUKTI PENGIRIMAN (ePOD)",
+    number: t.tripNo,
+    watermark: t.status === "Cancelled" ? "DIBATALKAN" : done ? undefined : "DRAFT",
+    recipient: { label: "Klien", name: t.client?.name ?? "-", lines: o ? [`Order ${o.orderNo}${o.clientRef ? ` · ref ${o.clientRef}` : ""}`] : [] },
+    meta: [["Tanggal", `${city}, ${tanggal(docDate(t.completedAt ?? t.createdAt))}`], ["Status", TRIP_STATUSES[t.status]?.label ?? t.status], ["Surat Jalan", t.suratJalanNo ?? "-"]],
+    blocks: [
+      { type: "kv", title: "Ringkasan", rows: [
+        ["Armada", `${t.vehicle.plateNo} · ${t.vehicle.truckType.name} · sopir ${t.driver.name}${t.helper ? `, kenek ${t.helper.name}` : ""}`],
+        ["Rute", t.route ? `${t.route.origin} → ${t.route.destination} (±${t.route.distanceKm} km)` : "-"],
+        ["Muatan", o ? `${o.cargoDesc}${o.cargoWeightTon ? `, ±${o.cargoWeightTon} ton` : ""}` : "-"],
+        ["P2H", t.preTripChecks.length ? t.preTripChecks.map((c, i) => `#${i + 1} ${jam(c.at)}: ${c.criticalFails ? `GAGAL (${c.criticalFails})` : c.otherFails ? `perlu override (${c.otherFails})` : "lolos"}`).join("; ") : "-"],
+        ["Serah terima SJ", handover ? `${jam(handover.at)} · ${plain(handover.note) || "-"}` : "-"],
+        ["Berangkat", jam(t.startedAt)],
+        ["Selesai", jam(t.completedAt)],
+        ["Durasi", hours != null ? `${hours.toFixed(1).replace(".", ",")} jam` : "-"],
+        ["Ketepatan tiba", t.promisedArrival ? `janji ${jam(t.promisedArrival)} · ${late == null ? "-" : late ? "TERLAMBAT" : "tepat waktu"}` : "-"],
+      ] },
+      ...(o?.stops.length ? [{ type: "table" as const, columns: [{ label: "No", width: 0.5, align: "center" as const }, { label: "Titik bongkar", width: 3.4 }, { label: "Tiba", width: 1.9, align: "center" as const }, { label: "Selesai bongkar", width: 1.9, align: "center" as const }],
+        rows: o.stops.map((s, i) => [String(s.seq), { text: s.name, sub: [s.address, s.city].filter(Boolean).join(", ") || null }, jam(unload[i]?.at), jam(leftStop[i]?.at)]) }] : []),
+      { type: "heading", text: "Kronologi" },
+      { type: "table", columns: [{ label: "Waktu", width: 1.9 }, { label: "Kejadian", width: 4.4 }, { label: "Oleh / sumber", width: 1.7 }],
+        rows: ev.map(e => [jam(e.at), { text: plain(e.label), sub: e.status === "Photo" ? null : plain(e.note) || null }, `${e.by ?? "-"} · ${e.source}`]) },
+      { type: "kv", title: "Bukti pengiriman", rows: [
+        ["ePOD (SJ bertanda tangan)", pods.length ? pods.map(p => `${jam(p.at)} — ${plain(p.label)}`).join("; ") : "belum ada foto ePOD"],
+        ["Foto lain", `${Math.max(0, photos.length - pods.length)} foto (muatan/segel/nota) tersimpan di sistem`],
+      ] },
+      { type: "note", text: done ? "Trip telah selesai. Laporan ini menjadi lampiran penagihan (invoice) kepada klien." : "Trip belum selesai — laporan sementara." },
+    ],
+    signatures: [
+      { lead: "Pengemudi,", name: t.driver.name, title: `Sopir · ${t.vehicle.plateNo}` },
+      { lead: "Diverifikasi oleh,", org: brand.company, name: ops?.name ?? "(.................................)", title: ops?.title ?? "Operasional" },
+    ],
+  };
+}
+
+/** Invoice charter: diterbitkan setelah trip selesai (order Completed); lampiran = laporan trip/ePOD. */
+async function invoice(id: string): Promise<DocModel | null> {
+  const o = await prisma.charterOrder.findUnique({ where: { id }, include: { client: true, route: true, truckType: true } });
+  if (!o) return null;
+  const trips = await prisma.trip.findMany({ where: { orderId: id }, include: { vehicle: true }, orderBy: { createdAt: "asc" } });
+  const { brand, city, bank, signers } = await getLogisticsBrand();
+  const finance = signers.find(s => s.key === "finance") ?? signers.find(s => s.key === "director");
+  const lines = JSON.parse(o.breakdownJson || "[]") as PriceLine[];
+  const doneTrip = trips.find(t => t.status === "Completed");
+  const date = docDate(doneTrip?.completedAt ?? new Date().toISOString());
+  const days = parseInt(o.client.paymentTerms) || 30;
+  const due = new Date(new Date(date + "T00:00:00Z").getTime() + days * 86_400_000).toISOString().slice(0, 10);
+  const invNo = `INV-${o.orderNo}`;
+  return {
+    brand,
+    fileName: safeName(`Invoice ${invNo} ${o.client.name}`),
+    title: "INVOICE",
+    number: invNo,
+    watermark: o.status === "Cancelled" ? "DIBATALKAN" : o.status !== "Completed" ? "DRAFT" : undefined,
+    recipient: { label: "Ditagihkan kepada", name: o.client.name, lines: [o.client.contactName ? `u.p. ${o.client.contactName}` : "", o.client.address ?? "", o.client.city ?? ""].filter(Boolean) },
+    meta: [["Tanggal", `${city}, ${tanggal(date)}`], ["Jatuh tempo", tanggal(due)], ["No. order", o.orderNo], ["Ref. klien", o.clientRef || "-"]],
+    blocks: [
+      { type: "kv", title: "Rincian jasa", rows: [
+        ["Jasa", `Sewa truk charter (FTL) ${o.truckType.name}`],
+        ["Rute", `${o.route.origin} → ${o.route.destination} (±${o.route.distanceKm} km)`],
+        ["Trip", trips.map(t => `${t.tripNo} · ${t.vehicle.plateNo} · SJ ${t.suratJalanNo ?? "-"}${t.completedAt ? ` · selesai ${tanggal(docDate(t.completedAt))}` : ""}`).join("; ") || "-"],
+        ["Muatan", `${o.cargoDesc}${o.cargoWeightTon ? `, ±${o.cargoWeightTon} ton` : ""}`],
+      ] },
+      { type: "table", columns: [{ label: "No", width: 0.5, align: "center" }, { label: "Uraian", width: 5 }, { label: "Jumlah (Rp)", width: 2, align: "right" }],
+        rows: lines.map((l, i) => [String(i + 1), { text: l.label, sub: l.detail }, (l.amount < 0 ? "− " : "") + Math.abs(Math.round(l.amount)).toLocaleString("id-ID")]) },
+      { type: "totals", rows: [
+        ...(o.discountAmount > 0 ? [[`Diskon kontrak ${o.discountPercent}%`, `− ${rupiah(o.discountAmount)}`] as [string, string]] : []),
+        ["Subtotal (DPP)", rupiah(o.subtotal)], [`PPN ${o.taxPercent}%`, rupiah(o.taxAmount)],
+      ], total: ["TOTAL TAGIHAN", rupiah(o.total)] },
+      { type: "words", text: `Terbilang: ${terbilangRupiah(o.total)}` },
+      { type: "kv", title: "Pembayaran", rows: [["Transfer ke", bank], ["Termin", `${o.client.paymentTerms} sejak tanggal invoice`], ["Lampiran", "Surat Jalan bertanda tangan (ePOD) & Laporan Perjalanan"]] },
+    ],
+    signatures: [{ lead: "Hormat kami,", org: brand.company, name: finance?.name ?? "(.................................)", title: finance?.title ?? "Finance", stamp: true }],
+  };
+}
+
 export async function buildLogisticsDocument(kind: LogDocKind, id: string) {
   switch (kind) {
     case "charter-quote": return charterQuote(id);
     case "surat-jalan": return suratJalan(id);
+    case "p2h": return p2hReport(id);
+    case "trip-report": return tripReport(id);
+    case "invoice": return invoice(id);
   }
 }

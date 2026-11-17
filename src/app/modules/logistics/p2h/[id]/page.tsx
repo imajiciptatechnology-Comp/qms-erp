@@ -4,7 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getLogisticsAccess } from "../../server";
 import { TRIP_STATUSES } from "../../trackingLib";
-import { Card, InfoRow } from "../../ui";
+import { Card, DocLinks, InfoRow } from "../../ui";
 import P2HRecordView from "../P2HRecordView";
 import { chatProofFor, submittedBy } from "../data";
 import { DeleteP2HButton } from "../../trips/[id]/TripControls";
@@ -32,7 +32,7 @@ export default async function P2HRecordPage({ params }: { params: Promise<{ id: 
       <Link href="/modules/logistics/p2h" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft className="w-4 h-4" /> P2H records</Link>
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
         <div className="xl:col-span-2">
-          <Card title={`P2H ${check.vehicle.plateNo}`}>
+          <Card title={`P2H ${check.vehicle.plateNo}`} actions={<div className="flex gap-2"><DocLinks kind="p2h" id={check.id} label="Laporan P2H" /></div>}>
             <P2HRecordView check={check} submittedBy={by} proof={proof} />
           </Card>
         </div>

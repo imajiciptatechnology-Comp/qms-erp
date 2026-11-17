@@ -168,6 +168,7 @@ const WATERMARK_TEXT = {
   DIBATALKAN: "DIBATALKAN — dokumen ini tidak berlaku",
   PAID: "PAID",
   CANCELLED: "CANCELLED — this document is void",
+  GAGAL: "GAGAL — kendaraan TIDAK LAYAK JALAN",
 };
 
 return async function renderDocx(d: DocModel) {

@@ -43,6 +43,7 @@ export default async function TripDetail({ params }: { params: Promise<{ id: str
         </div>
         <div className="flex flex-wrap gap-2">
           {trip.suratJalanNo && <DocLinks kind="surat-jalan" id={trip.id} label="Surat Jalan" />}
+          {!trip.isSimulated && trip.startedAt && <DocLinks kind="trip-report" id={trip.id} label="Laporan Trip/ePOD" />}
           {!trip.isSimulated && <TripActions tripId={trip.id} tripNo={trip.tripNo} canIssue={access.canDispatch && preDeparture && !trip.suratJalanNo && !!trip.p2hDoneAt && ev.blocked.length === 0 && ev.pending.length === 0} canCancel={access.canDispatch && preDeparture}
             canDelete={access.canDispatch && (["Scheduled", "Cancelled"].includes(trip.status) || (trip.status === "Completed" && access.isSuperAdmin))} />}
         </div>

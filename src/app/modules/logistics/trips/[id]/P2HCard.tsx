@@ -1,7 +1,7 @@
 // Riwayat P2H trip (server component): pemeriksaan terbaru terbuka, yang sebelumnya bisa dibuka.
 // Bukti chat sopir per pemeriksaan ada di halaman P2H records/[id].
 import Link from "next/link";
-import { Card } from "../../ui";
+import { Card, DocLinks } from "../../ui";
 import P2HRecordView, { p2hFmt, p2hVerdict, type P2HCheck } from "../../p2h/P2HRecordView";
 import { submittedBy } from "../../p2h/data";
 
@@ -12,7 +12,7 @@ export default function P2HCard({ checks, driverName }: { checks: (P2HCheck & { 
   const [last, ...older] = checks; // urut terbaru dulu
   const proofLink = (id: string) => <Link href={`/modules/logistics/p2h/${id}`} className="text-xs font-medium text-blue-700 hover:underline">Lihat bukti chat sopir →</Link>;
   return (
-    <Card title={`Pre-trip check (P2H)${checks.length > 1 ? ` · ${checks.length} kali` : ""}`} actions={proofLink(last.id)}>
+    <Card title={`Pre-trip check (P2H)${checks.length > 1 ? ` · ${checks.length} kali` : ""}`} actions={<div className="flex flex-wrap items-center gap-2"><a href={`/modules/logistics/documents/p2h/${last.id}?format=pdf`} target="_blank" rel="noreferrer" className="text-xs font-medium text-blue-700 hover:underline">Laporan P2H (PDF)</a>{proofLink(last.id)}</div>}>
       <P2HRecordView check={last} submittedBy={submittedBy(last, driverName)} />
       {older.length > 0 && (
         <div className="mt-4 border-t border-slate-100 pt-3 space-y-2">
@@ -28,7 +28,7 @@ export default function P2HCard({ checks, driverName }: { checks: (P2HCheck & { 
                 </summary>
                 <div className="mt-3 space-y-2">
                   <P2HRecordView check={c} submittedBy={submittedBy(c, driverName)} />
-                  {proofLink(c.id)}
+                  <div className="flex flex-wrap gap-2"><DocLinks kind="p2h" id={c.id} label="Laporan P2H" />{proofLink(c.id)}</div>
                 </div>
               </details>
             );

@@ -30,6 +30,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
         </div>
         <div className="flex flex-wrap gap-2">
           <DocLinks kind="charter-quote" id={o.id} label={o.status === "Draft" ? "Penawaran" : "Konfirmasi"} />
+          {o.status === "Completed" && <DocLinks kind="invoice" id={o.id} label="Invoice" />}
           {editable && <Link href={`/modules/logistics/orders/${o.id}/edit`} className={btnSecondary}>Edit</Link>}
           {access.canDispatch && o.status === "Confirmed" && <Link href={`/modules/logistics/dispatch?order=${o.id}`} className={btnPrimary}>Dispatch (assign truck & driver)</Link>}
           {access.canOrder && <OrderActions id={o.id} status={o.status} />}

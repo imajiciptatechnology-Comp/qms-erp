@@ -614,7 +614,15 @@ async function handlePhoto(c: NonNullable<Ctx>, chatId: string, m: TgMessage) {
       : await uploadToStorage(`logistics/telegram/${c.driver.id}`, new File([new Uint8Array(bytes)], `tg-${Date.now()}.jpg`, { type: "image/jpeg" }));
     await log({ chatId, ...ctx, direction: "in", kind: "photo", text: m.caption ?? null, fileUrl });
     await notifyChatIn(c, "photo", m.caption ?? null);
-    if (!isAiConfigured() || !(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "📷 Foto diterima dan disimpan. Terima kasih, Pak.");
+    if (!isAiConfigured() || !(await aiQuotaOk(c.driver.id))) {
+      // Tanpa AI: foto tetap masuk kronologi trip; jenisnya ditebak dari caption (mis. "ePOD", "SJ ttd").
+      if (c.trip) {
+        const isPod = /e-?pod|surat jalan|\bsj\b|ttd|tanda tangan/i.test(m.caption ?? "");
+        await prisma.tripEvent.create({ data: { tripId: c.trip.id, status: "Photo", label: isPod ? `Surat jalan bertanda tangan (ePOD)${m.caption ? `: ${m.caption}` : ""}` : `Foto${m.caption ? `: ${m.caption}` : ""}`, at: nowIso(), lat: c.trip.lastLat, lng: c.trip.lastLng, note: fileUrl, source: "Telegram", by: c.driver.name } });
+        if (isPod) return reply(chatId, ctx, "📷 Surat jalan bertanda tangan (ePOD) diterima. Jangan lupa tekan tombol ✅ Selesai bongkar.");
+      }
+      return reply(chatId, ctx, "📷 Foto diterima dan disimpan. Terima kasih, Pak.");
+    }
     await chatAction(chatId).catch(() => {});
     const dataUrl = `data:image/jpeg;base64,${bytes.toString("base64")}`;
     const tripInfo = c.trip ? `${c.trip.vehicle.plateNo}, status ${TRIP_STATUSES[c.trip.status]?.label}, ${c.trip.route?.destination ?? ""}` : "no active trip";

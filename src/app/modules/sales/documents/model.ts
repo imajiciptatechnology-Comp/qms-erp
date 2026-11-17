@@ -37,7 +37,7 @@ export type DocModel = {
   title: string;
   number: string;
   /** Tanda besar miring di PDF (dan baris peringatan di Word). */
-  watermark?: "DRAFT" | "LUNAS" | "DIBATALKAN" | "PAID" | "CANCELLED";
+  watermark?: "DRAFT" | "LUNAS" | "DIBATALKAN" | "PAID" | "CANCELLED" | "GAGAL";
   /** Bahasa label kop/footer (dokumen ekspor = "en"). */
   lang?: "id" | "en";
   /** Kiri: penerima; kanan: pasangan label-nilai (tanggal, perihal, dst). */
