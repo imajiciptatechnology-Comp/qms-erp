@@ -238,7 +238,8 @@ async function tripReport(id: string): Promise<DocModel | null> {
 async function invoice(id: string): Promise<DocModel | null> {
   const o = await prisma.charterOrder.findUnique({ where: { id }, include: { client: true, route: true, truckType: true } });
   if (!o) return null;
-  const trips = await prisma.trip.findMany({ where: { orderId: id }, include: { vehicle: true }, orderBy: { createdAt: "asc" } });
+  // Hanya trip yang benar-benar jalan; trip dibatalkan (mis. P2H gagal lalu ganti truk) tidak ditagihkan.
+  const trips = await prisma.trip.findMany({ where: { orderId: id, status: { not: "Cancelled" } }, include: { vehicle: true }, orderBy: { createdAt: "asc" } });
   const { brand, city, bank, signers } = await getLogisticsBrand();
   const finance = signers.find(s => s.key === "finance") ?? signers.find(s => s.key === "director");
   const lines = JSON.parse(o.breakdownJson || "[]") as PriceLine[];
