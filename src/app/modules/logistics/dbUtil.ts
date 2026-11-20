@@ -24,12 +24,23 @@ export async function tryWithLock<T>(key: string, fn: (tx: Tx) => Promise<T>): P
  * Menggantikan pola getJson → setJson yang bisa kebobolan saat beberapa request bersamaan.
  */
 export async function consumeDailyQuota(name: string, limit: number): Promise<boolean> {
-  const key = `${name}:${today()}`;
+  return (await incrementCounter(`${name}:${today()}`)) <= limit;
+}
+
+/**
+ * Kuota bulanan (WIB) atomik. Mengembalikan hitungan setelah dinaikkan, supaya pemanggil bisa
+ * mengirim peringatan tepat sekali (mis. saat hitungan == 80% batas atau == batas + 1).
+ */
+export async function consumeMonthlyQuota(name: string): Promise<number> {
+  return incrementCounter(`${name}:${today().slice(0, 7)}`);
+}
+
+async function incrementCounter(key: string): Promise<number> {
   const rows = await prisma.$queryRaw<{ value: string }[]>`
     INSERT INTO "KvStore" ("key", "value", "updatedAt") VALUES (${key}, '1', NOW())
     ON CONFLICT ("key") DO UPDATE SET "value" = (COALESCE(NULLIF("KvStore"."value", ''), '0')::int + 1)::text, "updatedAt" = NOW()
     RETURNING "value"`;
-  return Number(rows[0]?.value ?? 0) <= limit;
+  return Number(rows[0]?.value ?? 0);
 }
 
 /** Klaim jatah "paling sering sekali per `intervalMs`" secara atomik. true = pemanggil ini yang menjalankan. */

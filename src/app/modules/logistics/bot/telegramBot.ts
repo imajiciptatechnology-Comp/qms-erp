@@ -7,7 +7,7 @@ import { uploadToStorage } from "@/lib/uploadFile";
 import { DRIVER_DOC_TYPES, VEHICLE_DOC_TYPES } from "../lib";
 import { ACTIVE_TRIP_STATUSES, TRIP_STATUSES, gmapsDirections, haversineKm, parsePlan } from "../trackingLib";
 import { notifyPermission } from "../fleetDocs";
-import { consumeDailyQuota } from "../dbUtil";
+import { consumeDailyQuota, consumeMonthlyQuota } from "../dbUtil";
 import { scanFleetDocument } from "../ai/scanFleetDoc";
 import { applyTripStatus, nextActions, recordP2H, stopsTotalOf } from "../tripOps";
 import { P2H_ITEMS, p2hItem, parseOdometer, type P2HResult } from "../p2hLib";
@@ -42,7 +42,10 @@ const HELP = [
   "• Tanya bebas, mis. \"alamat bongkar kedua di mana?\" atau lapor \"ban bocor di tol km 120\".",
 ].join("\n");
 
-const DAILY_AI_LIMIT = 40;
+/** Pesan AI (foto di luar P2H, voice note, teks bebas) per sopir per hari. Tombol, menu, lokasi & P2H via tombol tidak dihitung. */
+const DAILY_AI_LIMIT = 20;
+/** Total pesan AI bot untuk seluruh sopir per bulan (WIB): pengaman biaya API. Bisa diubah lewat env. */
+const MONTHLY_AI_LIMIT = Number(process.env.AI_BOT_MONTHLY_LIMIT) || 6000;
 const MAX_VOICE_SECONDS = 180;
 
 /** Chat dari Driver simulator di browser (demo tanpa HP): "sim-<driverId>". Tidak ada panggilan ke Telegram. */
@@ -91,8 +94,22 @@ async function editButtons(chatId: string, ref: { logId?: string | null; msgId?:
   if (ref.logId) await prisma.chatMessage.update({ where: { id: ref.logId }, data: { aiJson: JSON.stringify({ buttons: inline }) } }).catch(() => {});
 }
 
-/** Kuota AI per sopir per hari (WIB), atomik. */
-const aiQuotaOk = (driverId: string) => consumeDailyQuota(`ai_bot_usage:${driverId}`, DAILY_AI_LIMIT);
+/**
+ * Kuota AI ganda, atomik: per sopir per hari, lalu total semua sopir per bulan.
+ * Kuota bulanan hanya terpakai bila kuota harian sopir masih ada. Kantor diberi tahu sekali
+ * saat pemakaian bulanan mencapai 80%, dan sekali saat batasnya habis.
+ */
+async function aiQuotaOk(driverId: string): Promise<boolean> {
+  if (!(await consumeDailyQuota(`ai_bot_usage:${driverId}`, DAILY_AI_LIMIT))) return false;
+  const used = await consumeMonthlyQuota("ai_bot_usage_total");
+  const warn = used === Math.floor(MONTHLY_AI_LIMIT * 0.8)
+    ? `⚠️ Pemakaian AI bot sopir bulan ini sudah 80% (${used} dari ${MONTHLY_AI_LIMIT} pesan).`
+    : used === MONTHLY_AI_LIMIT + 1
+      ? `⛔ Kuota AI bot sopir bulan ini (${MONTHLY_AI_LIMIT} pesan) sudah habis. Bot tetap jalan lewat tombol; foto, voice note & teks bebas tidak dibaca AI sampai bulan depan.`
+      : null;
+  if (warn) await notifyPermission("logistics_dispatch", [warn], "/modules/logistics/tracking").catch(err => console.error("[bot] notify quota", err));
+  return used <= MONTHLY_AI_LIMIT;
+}
 
 type Ctx = Awaited<ReturnType<typeof loadContext>>;
 
@@ -497,7 +514,7 @@ async function handleP2HInput(c: NonNullable<Ctx>, chatId: string, text: string,
   }
   // Langkah checklist: teks/voice bebas → AI mengisi saran, sopir mengecek sisanya.
   if (!isAiConfigured()) return reply(chatId, ctx, "Tekan tombol di checklist untuk setiap item (⬜ → ✅ / ❌).");
-  if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Isi checklist dengan tombol.");
+  if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI sudah tercapai. Isi checklist dengan tombol.");
   try {
     const { result, notes } = await parseP2HText(text);
     const cur = parseState((await prisma.chatChannelLink.findUnique({ where: { id: c.link.id }, select: { stateJson: true } }))?.stateJson);
@@ -558,7 +575,7 @@ async function finishP2H(c: NonNullable<Ctx>, chatId: string, flow: P2HFlowState
 async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string, source: "text" | "voice") {
   const ctx = { driverId: c.driver.id, tripId: c.trip?.id ?? null };
   if (!isAiConfigured()) return reply(chatId, ctx, "Pesan diterima dan diteruskan ke dispatcher. Gunakan tombol menu untuk status trip.");
-  if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Pakai tombol menu, atau telepon kantor.");
+  if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI sudah tercapai. Pakai tombol menu, atau telepon kantor.");
   const state = getState(c);
   try {
     if (state.awaiting === "p2h") await setState(c, {}); // status lama (sebelum checklist rinci)
@@ -585,7 +602,7 @@ async function handleFreeText(c: NonNullable<Ctx>, chatId: string, text: string,
 async function handleVoice(c: NonNullable<Ctx>, chatId: string, fileId: string, mime: string) {
   const ctx = { driverId: c.driver.id, tripId: c.trip?.id ?? null };
   if (!isAiConfigured()) return reply(chatId, ctx, "Voice note belum bisa dibaca (AI belum aktif). Silakan ketik pesannya.");
-  if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI hari ini sudah tercapai. Silakan ketik atau pakai tombol menu.");
+  if (!(await aiQuotaOk(c.driver.id))) return reply(chatId, ctx, "Batas pesan AI sudah tercapai. Silakan ketik atau pakai tombol menu.");
   await chatAction(chatId).catch(() => {});
   try {
     const { bytes } = await downloadFile(chatId, fileId);
